@@ -55,6 +55,11 @@ jobs:
           install: >-
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkg-config
+      - name: Add MinGW to PATH
+        run: |
+          echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
+          echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
+        shell: pwsh
       - name: Prepare Go cache directories
         run: |
           New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\go-build" | Out-Null
@@ -74,6 +79,8 @@ jobs:
           $env:GOCACHE = "$env:RUNNER_TEMP\go-build"
           $env:GOMODCACHE = "$env:RUNNER_TEMP\go-mod"
           $env:GOTMPDIR = "$env:RUNNER_TEMP\go-tmp"
+          $env:CGO_ENABLED = "1"
+          $env:CC = "gcc"
           go mod tidy
           go mod download
         shell: pwsh
