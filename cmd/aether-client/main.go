@@ -1,0 +1,564 @@
+package main
+
+import (
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/binary"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/armon/go-socks5"
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
+	webtransport "github.com/quic-go/webtransport-go"
+	"golang.org/x/crypto/hkdf"
+)
+
+const (
+	protocolLabel      = "aether-realist-v3"
+	recordHeaderLength = 24
+	typeMetadata       = 0x01
+	typeData           = 0x02
+	typeError          = 0x7f
+)
+
+type clientOptions struct {
+	serverURL   string
+	psk         string
+	listenAddr  string
+	dialAddr    string
+	rotateAfter time.Duration
+	maxPadding  uint16
+	autoIP      bool
+}
+
+func main() {
+	var opts clientOptions
+	flag.StringVar(&opts.serverURL, "url", "https://example.com/v1/api/sync", "WebTransport endpoint URL")
+	flag.StringVar(&opts.psk, "psk", "", "pre-shared key for metadata encryption")
+	flag.StringVar(&opts.listenAddr, "listen", "127.0.0.1:1080", "local SOCKS5 listen address")
+	flag.StringVar(&opts.dialAddr, "dial-addr", "", "override dial address for QUIC (e.g. 203.0.113.10:443)")
+	flag.DurationVar(&opts.rotateAfter, "rotate", 20*time.Minute, "session rotation interval")
+	flag.UintVar((*uint)(&opts.maxPadding), "max-padding", 128, "maximum random padding per record")
+	flag.BoolVar(&opts.autoIP, "auto-ip", false, "auto select optimized IP from https://ip.v2too.top/")
+	flag.Parse()
+
+	if opts.psk == "" {
+		log.Fatal("missing --psk")
+	}
+
+	if opts.dialAddr == "" && opts.autoIP {
+		ip, err := selectOptimizedIP()
+		if err != nil {
+			log.Printf("auto-ip failed: %v", err)
+		} else {
+			opts.dialAddr = fmt.Sprintf("%s:443", ip)
+			log.Printf("auto-ip selected %s", opts.dialAddr)
+		}
+	}
+
+	manager, err := newSessionManager(opts)
+	if err != nil {
+		log.Fatalf("session manager init failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.startRotation(ctx)
+
+	socksConf := &socks5.Config{
+		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, portStr, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			port, err := parsePort(portStr)
+			if err != nil {
+				return nil, err
+			}
+			return manager.openStream(ctx, host, port)
+		},
+	}
+
+	server, err := socks5.New(socksConf)
+	if err != nil {
+		log.Fatalf("socks5 init failed: %v", err)
+	}
+
+	log.Printf("Aether client listening on %s", opts.listenAddr)
+	if err := server.ListenAndServe("tcp", opts.listenAddr); err != nil {
+		log.Fatalf("socks5 server stopped: %v", err)
+	}
+}
+
+type sessionManager struct {
+	opts        clientOptions
+	url         *url.URL
+	mu          sync.Mutex
+	session     *webtransport.Session
+	counter     uint64
+	dialer      *webtransport.Dialer
+	closeSignal chan struct{}
+}
+
+func newSessionManager(opts clientOptions) (*sessionManager, error) {
+	parsed, err := url.Parse(opts.serverURL)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf("url must be https")
+	}
+
+	quicConfig := &quic.Config{
+		KeepAlivePeriod: 20 * time.Second,
+		MaxIdleTimeout:  60 * time.Second,
+	}
+
+	roundTripper := &http3.RoundTripper{
+		TLSClientConfig: (&tlsConfig{serverName: parsed.Hostname()}).toTLSConfig(),
+		QuicConfig:      quicConfig,
+	}
+
+	if opts.dialAddr != "" {
+		roundTripper.Dial = func(ctx context.Context, addr string, tlsConf *tls.Config, conf *quic.Config) (quic.EarlyConnection, error) {
+			return quic.DialAddrEarly(ctx, opts.dialAddr, tlsConf, conf)
+		}
+	}
+
+	dialer := &webtransport.Dialer{RoundTripper: roundTripper}
+
+	return &sessionManager{
+		opts:        opts,
+		url:         parsed,
+		dialer:      dialer,
+		closeSignal: make(chan struct{}),
+	}, nil
+}
+
+func (m *sessionManager) startRotation(ctx context.Context) {
+	if m.opts.rotateAfter <= 0 {
+		return
+	}
+	ticker := time.NewTicker(m.opts.rotateAfter)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.resetSession()
+			case <-ctx.Done():
+				m.resetSession()
+				return
+			}
+		}
+	}()
+}
+
+func (m *sessionManager) resetSession() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.session != nil {
+		_ = m.session.CloseWithError(0, "rotation")
+	}
+	m.session = nil
+	m.counter = 0
+}
+
+func (m *sessionManager) openStream(ctx context.Context, host string, port uint16) (net.Conn, error) {
+	session, streamID, err := m.getSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stream, err := session.OpenBidirectionalStreamSync(ctx)
+	if err != nil {
+		m.resetSession()
+		return nil, err
+	}
+
+	metadata, err := buildMetadataRecord(host, port, m.opts.maxPadding, m.opts.psk, streamID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := stream.Write(metadata); err != nil {
+		return nil, err
+	}
+
+	return newWebTransportConn(stream, m.opts), nil
+}
+
+func (m *sessionManager) getSession(ctx context.Context) (*webtransport.Session, uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.session == nil {
+		session, err := m.dialSession(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		m.session = session
+		m.counter = 0
+	}
+	m.counter += 1
+	return m.session, m.counter, nil
+}
+
+func (m *sessionManager) dialSession(ctx context.Context) (*webtransport.Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	session, _, err := m.dialer.Dial(ctx, m.url.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+type webTransportConn struct {
+	stream     webtransport.Stream
+	reader     *recordReader
+	options    clientOptions
+	localAddr  net.Addr
+	remoteAddr net.Addr
+}
+
+func newWebTransportConn(stream webtransport.Stream, opts clientOptions) *webTransportConn {
+	return &webTransportConn{
+		stream:     stream,
+		reader:     newRecordReader(stream),
+		options:    opts,
+		localAddr:  dummyAddr("aether-local"),
+		remoteAddr: dummyAddr("aether-remote"),
+	}
+}
+
+func (c *webTransportConn) Read(p []byte) (int, error) {
+	return c.reader.Read(p)
+}
+
+func (c *webTransportConn) Write(p []byte) (int, error) {
+	record, err := buildDataRecord(p, c.options.maxPadding)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := c.stream.Write(record); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (c *webTransportConn) Close() error {
+	return c.stream.Close()
+}
+
+func (c *webTransportConn) LocalAddr() net.Addr {
+	return c.localAddr
+}
+
+func (c *webTransportConn) RemoteAddr() net.Addr {
+	return c.remoteAddr
+}
+
+func (c *webTransportConn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *webTransportConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *webTransportConn) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
+type recordReader struct {
+	reader io.Reader
+	stash  []byte
+}
+
+func newRecordReader(reader io.Reader) *recordReader {
+	return &recordReader{reader: reader}
+}
+
+func (r *recordReader) Read(p []byte) (int, error) {
+	for len(r.stash) == 0 {
+		record, err := readRecord(r.reader)
+		if err != nil {
+			return 0, err
+		}
+		if record.recordType == typeError {
+			return 0, fmt.Errorf("server error: %s", record.errorMessage)
+		}
+		if record.recordType != typeData {
+			continue
+		}
+		r.stash = record.payload
+	}
+
+	n := copy(p, r.stash)
+	r.stash = r.stash[n:]
+	return n, nil
+}
+
+type record struct {
+	recordType   byte
+	payload      []byte
+	errorMessage string
+}
+
+func readRecord(reader io.Reader) (*record, error) {
+	lengthBytes := make([]byte, 4)
+	if _, err := io.ReadFull(reader, lengthBytes); err != nil {
+		return nil, err
+	}
+	totalLength := binary.BigEndian.Uint32(lengthBytes)
+	if totalLength < recordHeaderLength {
+		return nil, errors.New("invalid record length")
+	}
+
+	recordBytes := make([]byte, totalLength)
+	if _, err := io.ReadFull(reader, recordBytes); err != nil {
+		return nil, err
+	}
+
+	recordType := recordBytes[0]
+	payloadLength := binary.BigEndian.Uint32(recordBytes[4:8])
+	paddingLength := binary.BigEndian.Uint32(recordBytes[8:12])
+
+	if int(recordHeaderLength+payloadLength+paddingLength) != len(recordBytes) {
+		return nil, errors.New("invalid payload length")
+	}
+
+	payloadStart := recordHeaderLength
+	payloadEnd := payloadStart + payloadLength
+	payload := recordBytes[payloadStart:payloadEnd]
+
+	result := &record{recordType: recordType, payload: payload}
+	if recordType == typeError {
+		if len(payload) >= 4 {
+			result.errorMessage = string(payload[4:])
+		}
+	}
+	return result, nil
+}
+
+func buildMetadataRecord(host string, port uint16, maxPadding uint16, psk string, streamID uint64) ([]byte, error) {
+	plaintext, err := buildMetadataPayload(host, port, maxPadding)
+	if err != nil {
+		return nil, err
+	}
+
+	iv := make([]byte, 12)
+	if _, err := rand.Read(iv); err != nil {
+		return nil, err
+	}
+
+	key, err := deriveKey(psk, streamID)
+	if err != nil {
+		return nil, err
+	}
+
+	header := make([]byte, recordHeaderLength)
+	header[0] = typeMetadata
+	binary.BigEndian.PutUint32(header[4:8], uint32(len(plaintext)))
+	binary.BigEndian.PutUint32(header[8:12], 0)
+	copy(header[12:24], iv)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	ciphertext := gcm.Seal(nil, iv, plaintext, header)
+	binary.BigEndian.PutUint32(header[4:8], uint32(len(ciphertext)))
+
+	return buildRecord(header, ciphertext, nil), nil
+}
+
+func buildDataRecord(payload []byte, maxPadding uint16) ([]byte, error) {
+	paddingLength := randomPadding(maxPadding)
+	padding := make([]byte, paddingLength)
+	if paddingLength > 0 {
+		if _, err := rand.Read(padding); err != nil {
+			return nil, err
+		}
+	}
+
+	header := make([]byte, recordHeaderLength)
+	header[0] = typeData
+	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
+	binary.BigEndian.PutUint32(header[8:12], uint32(len(padding)))
+	if _, err := rand.Read(header[12:24]); err != nil {
+		return nil, err
+	}
+
+	return buildRecord(header, payload, padding), nil
+}
+
+func buildRecord(header, payload, padding []byte) []byte {
+	totalLength := recordHeaderLength + len(payload) + len(padding)
+	record := make([]byte, 4+totalLength)
+	binary.BigEndian.PutUint32(record[0:4], uint32(totalLength))
+	copy(record[4:4+recordHeaderLength], header)
+	copy(record[4+recordHeaderLength:], payload)
+	copy(record[4+recordHeaderLength+len(payload):], padding)
+	return record
+}
+
+func buildMetadataPayload(host string, port uint16, maxPadding uint16) ([]byte, error) {
+	var addrType byte
+	var addrBytes []byte
+
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() != nil {
+			addrType = 0x01
+			addrBytes = ip.To4()
+		} else {
+			addrType = 0x02
+			addrBytes = ip.To16()
+		}
+	} else {
+		addrType = 0x03
+		if len(host) > 255 {
+			return nil, errors.New("domain too long")
+		}
+		addrBytes = append([]byte{byte(len(host))}, []byte(host)...)
+	}
+
+	options := buildOptions(maxPadding)
+	payload := make([]byte, 0, 1+2+len(addrBytes)+2+len(options))
+	payload = append(payload, addrType)
+	portBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(portBytes, port)
+	payload = append(payload, portBytes...)
+	payload = append(payload, addrBytes...)
+
+	optionsLen := make([]byte, 2)
+	binary.BigEndian.PutUint16(optionsLen, uint16(len(options)))
+	payload = append(payload, optionsLen...)
+	payload = append(payload, options...)
+	return payload, nil
+}
+
+func buildOptions(maxPadding uint16) []byte {
+	if maxPadding == 0 {
+		return nil
+	}
+	option := make([]byte, 4)
+	option[0] = 0x01
+	option[1] = 0x02
+	binary.BigEndian.PutUint16(option[2:4], maxPadding)
+	return option
+}
+
+func deriveKey(psk string, streamID uint64) ([]byte, error) {
+	info := []byte(fmt.Sprintf("%d", streamID))
+	reader := hkdf.New(sha256.New, []byte(psk), []byte(protocolLabel), info)
+	key := make([]byte, 16)
+	if _, err := io.ReadFull(reader, key); err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+func randomPadding(maxPadding uint16) int {
+	if maxPadding == 0 {
+		return 0
+	}
+	n := make([]byte, 1)
+	if _, err := rand.Read(n); err != nil {
+		return 0
+	}
+	return int(n[0]) % int(maxPadding+1)
+}
+
+func parsePort(portStr string) (uint16, error) {
+	port, err := net.LookupPort("tcp", portStr)
+	if err == nil {
+		return uint16(port), nil
+	}
+	var value uint64
+	_, err = fmt.Sscanf(portStr, "%d", &value)
+	if err != nil || value > 65535 {
+		return 0, errors.New("invalid port")
+	}
+	return uint16(value), nil
+}
+
+func selectOptimizedIP() (string, error) {
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Get("https://ip.v2too.top/")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	ips := strings.Fields(string(body))
+	if len(ips) == 0 {
+		return "", errors.New("empty ip list")
+	}
+
+	bestIP := ""
+	bestLatency := 5 * time.Second
+	for _, ip := range ips {
+		latency, err := probeIP(ip)
+		if err != nil {
+			continue
+		}
+		if latency < bestLatency {
+			bestLatency = latency
+			bestIP = ip
+		}
+	}
+
+	if bestIP == "" {
+		return "", errors.New("no reachable ip")
+	}
+	return bestIP, nil
+}
+
+func probeIP(ip string) (time.Duration, error) {
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:443", ip), 800*time.Millisecond)
+	if err != nil {
+		return 0, err
+	}
+	_ = conn.Close()
+	return time.Since(start), nil
+}
+
+type dummyAddr string
+
+func (d dummyAddr) Network() string { return string(d) }
+func (d dummyAddr) String() string  { return string(d) }
+
+// tlsConfig wraps a minimal TLS config definition to avoid relying on global defaults.
+type tlsConfig struct {
+	serverName string
+}
+
+func (t *tlsConfig) toTLSConfig() *tls.Config {
+	return &tls.Config{ServerName: t.serverName, NextProtos: []string{http3.NextProtoH3}}
+}
