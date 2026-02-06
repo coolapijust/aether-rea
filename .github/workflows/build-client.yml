@@ -73,7 +73,7 @@ jobs:
           restore-keys: |
             go-mod-${{ runner.os }}-
 
-      - name: Build Windows executable
+      - name: Prepare build
         run: |
           rm -f go.sum
           export CGO_ENABLED=1
@@ -83,18 +83,18 @@ jobs:
           export CXX=x86_64-w64-mingw32-g++
           export CGO_CFLAGS="-I/usr/x86_64-w64-mingw32/include"
           export CGO_LDFLAGS="-L/usr/x86_64-w64-mingw32/lib -lglfw3 -lopengl32 -lgdi32"
-          
-          echo "=== Environment ==="
-          echo "CGO_ENABLED=$CGO_ENABLED"
-          echo "CC=$CC"
-          echo "CGO_CFLAGS=$CGO_CFLAGS"
-          echo "CGO_LDFLAGS=$CGO_LDFLAGS"
-          
-          echo "=== go mod tidy ==="
-          go mod tidy -v
-          
-          echo "=== go build ==="
-          go build -x -v -p 1 -ldflags="-H=windowsgui" -o aether-studio.exe ./cmd/aether-studio 2>&1
+          go mod tidy
+
+      - name: Build Windows executable
+        run: |
+          export CGO_ENABLED=1
+          export GOOS=windows
+          export GOARCH=amd64
+          export CC=x86_64-w64-mingw32-gcc
+          export CGO_LDFLAGS="-L/usr/x86_64-w64-mingw32/lib -lglfw3 -lopengl32 -lgdi32"
+          echo "Starting build..."
+          go build -v -p 1 -ldflags="-H=windowsgui" -o aether-studio.exe ./cmd/aether-studio
+          echo "Build complete!"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
