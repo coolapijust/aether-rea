@@ -36,65 +36,70 @@ jobs:
         with:
           name: aether-client-windows
           path: aether-client.exe
+
   build-studio-windows:
     runs-on: windows-latest
-    timeout-minutes: 20
-    env:
-      GOFLAGS: -mod=mod -buildvcs=false
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.21"
-          cache: false
-      - name: Install MinGW toolchain
+
+      - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
+          path-type: inherit
           install: >-
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkg-config
-      - name: Add MinGW to PATH
-        run: |
-          echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
-          echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
-        shell: pwsh
+            mingw-w64-x86_64-glfw
+            mingw-w64-x86_64-glew
+            mingw-w64-x86_64-mesa
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache: false
+
       - name: Prepare Go cache directories
         run: |
-          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\go-build" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\go-mod" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\go-tmp" | Out-Null
-        shell: pwsh
-      - name: Clear module cache
-        run: |
-          $env:GOCACHE = "$env:RUNNER_TEMP\go-build"
-          $env:GOMODCACHE = "$env:RUNNER_TEMP\go-mod"
-          $env:GOTMPDIR = "$env:RUNNER_TEMP\go-tmp"
-          go clean -modcache
-          if (Test-Path go.sum) { Remove-Item go.sum }
-        shell: pwsh
+          mkdir -p "/tmp/go-build"
+          mkdir -p "/tmp/go-mod"
+          mkdir -p "/tmp/go-tmp"
+
       - name: Download dependencies
+        env:
+          GOCACHE: /tmp/go-build
+          GOMODCACHE: /tmp/go-mod
+          GOTMPDIR: /tmp/go-tmp
+          CGO_ENABLED: 1
+          CC: gcc
+          CGO_CFLAGS: "-I/mingw64/include"
+          CGO_LDFLAGS: "-L/mingw64/lib"
+          GOFLAGS: "-mod=mod -buildvcs=false"
         run: |
-          $env:GOCACHE = "$env:RUNNER_TEMP\go-build"
-          $env:GOMODCACHE = "$env:RUNNER_TEMP\go-mod"
-          $env:GOTMPDIR = "$env:RUNNER_TEMP\go-tmp"
-          $env:CGO_ENABLED = "1"
-          $env:CC = "gcc"
           go mod tidy
           go mod download
-        shell: pwsh
+
       - name: Build Windows EXE
+        env:
+          GOCACHE: /tmp/go-build
+          GOMODCACHE: /tmp/go-mod
+          GOTMPDIR: /tmp/go-tmp
+          CGO_ENABLED: 1
+          CC: gcc
+          GOOS: windows
+          GOARCH: amd64
+          CGO_CFLAGS: "-I/mingw64/include"
+          CGO_LDFLAGS: "-L/mingw64/lib -lglfw3 -lglew32 -lopengl32 -lgdi32"
+          GOFLAGS: "-mod=mod -buildvcs=false"
         run: |
-          $env:GOCACHE = "$env:RUNNER_TEMP\go-build"
-          $env:GOMODCACHE = "$env:RUNNER_TEMP\go-mod"
-          $env:GOTMPDIR = "$env:RUNNER_TEMP\go-tmp"
-          $env:GOOS = "windows"
-          $env:GOARCH = "amd64"
-          $env:CGO_ENABLED = "1"
-          $env:CC = "gcc"
-          go build -v -o aether-studio.exe ./cmd/aether-studio
-        shell: pwsh
+          go build -v -ldflags="-H=windowsgui" -o aether-studio.exe ./cmd/aether-studio
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
