@@ -135,6 +135,7 @@ func newSessionManager(opts clientOptions) (*sessionManager, error) {
 	quicConfig := &quic.Config{
 		KeepAlivePeriod: 20 * time.Second,
 		MaxIdleTimeout:  60 * time.Second,
+		EnableDatagrams: true,
 	}
 
 	dialer := &webtransport.Dialer{
