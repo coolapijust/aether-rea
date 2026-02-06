@@ -39,6 +39,11 @@ jobs:
   build-studio-windows:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      GOCACHE: ${{ runner.temp }}\go-build
+      GOMODCACHE: ${{ runner.temp }}\go-mod
+      GOTMPDIR: ${{ runner.temp }}\go-tmp
+      GOFLAGS: -mod=mod -buildvcs=false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -53,29 +58,24 @@ jobs:
           install: >-
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkg-config
+      - name: Prepare Go cache directories
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:GOCACHE | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:GOMODCACHE | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:GOTMPDIR | Out-Null
+        shell: pwsh
       - name: Clear module cache
         run: |
-          $env:GOCACHE = "$env:RUNNER_TEMP\\go-build"
-          $env:GOMODCACHE = "$env:RUNNER_TEMP\\go-mod"
-          $env:GOTMPDIR = "$env:RUNNER_TEMP\\go-tmp"
           go clean -modcache
           if (Test-Path go.sum) { Remove-Item go.sum }
         shell: pwsh
       - name: Download dependencies
         run: |
-          $env:GOCACHE = "$env:RUNNER_TEMP\\go-build"
-          $env:GOMODCACHE = "$env:RUNNER_TEMP\\go-mod"
-          $env:GOTMPDIR = "$env:RUNNER_TEMP\\go-tmp"
-          $env:GOFLAGS = "-mod=mod -buildvcs=false"
           go mod tidy
           go mod download
         shell: pwsh
       - name: Build Windows EXE
         run: |
-          $env:GOCACHE = "$env:RUNNER_TEMP\\go-build"
-          $env:GOMODCACHE = "$env:RUNNER_TEMP\\go-mod"
-          $env:GOTMPDIR = "$env:RUNNER_TEMP\\go-tmp"
-          $env:GOFLAGS = "-mod=mod -buildvcs=false"
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           $env:CGO_ENABLED = "1"
