@@ -33,20 +33,41 @@ jobs:
           name: aether-client-windows
           path: aether-client.exe
 
-  # 使用预构建的交叉编译镜像
+  # 使用 Ubuntu + 交叉编译工具链
   build-aether-studio:
     runs-on: ubuntu-latest
-    container:
-      image: docker.io/fyneio/fyne-cross-images:windows-latest
-      options: --user root
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # 安装 MinGW 交叉编译器
+      - name: Install MinGW
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64 g++-mingw-w64-x86-64
+
+      # 安装 Windows 版 GLFW 和 OpenGL 依赖
+      - name: Install Windows deps
+        run: |
+          sudo apt-get install -y mingw-w64-x86-64-dev
+          # 下载 GLFW Windows 库
+          wget -q https://github.com/glfw/glfw/releases/download/3.4/glfw-3.4.bin.WIN64.zip
+          unzip -q glfw-3.4.bin.WIN64.zip
+          sudo mkdir -p /usr/x86_64-w64-mingw32/include
+          sudo mkdir -p /usr/x86_64-w64-mingw32/lib
+          sudo cp glfw-3.4.bin.WIN64/include/GLFW/* /usr/x86_64-w64-mingw32/include/
+          sudo cp glfw-3.4.bin.WIN64/lib-mingw-w64/libglfw3.a /usr/x86_64-w64-mingw32/lib/
+          sudo cp glfw-3.4.bin.WIN64/lib-mingw-w64/libglfw3dll.a /usr/x86_64-w64-mingw32/lib/
 
       # 缓存 Go modules
       - name: Cache Go modules
         uses: actions/cache@v4
         with:
-          path: /go/pkg/mod
+          path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-mod-${{ runner.os }}-
@@ -57,6 +78,9 @@ jobs:
           export GOOS=windows
           export GOARCH=amd64
           export CC=x86_64-w64-mingw32-gcc
+          export CXX=x86_64-w64-mingw32-g++
+          export CGO_CFLAGS="-I/usr/x86_64-w64-mingw32/include"
+          export CGO_LDFLAGS="-L/usr/x86_64-w64-mingw32/lib -lglfw3 -lopengl32 -lgdi32"
           
           go mod tidy
           go build -p 1 -ldflags="-H=windowsgui" -o aether-studio.exe ./cmd/aether-studio
