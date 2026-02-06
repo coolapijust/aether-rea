@@ -386,8 +386,9 @@ func buildMetadataRecord(host string, port uint16, maxPadding uint16, psk string
 		return nil, err
 	}
 
+	ciphertextLen := len(plaintext) + gcm.Overhead()
+	binary.BigEndian.PutUint32(header[4:8], uint32(ciphertextLen))
 	ciphertext := gcm.Seal(nil, iv, plaintext, header)
-	binary.BigEndian.PutUint32(header[4:8], uint32(len(ciphertext)))
 
 	return buildRecord(header, ciphertext, nil), nil
 }
