@@ -15,15 +15,20 @@ type ConfigManager struct {
 	mu         sync.Mutex
 }
 
-// NewConfigManager creates a new manager looking for config in the executable directory.
+// NewConfigManager creates a new manager using the user config directory.
 func NewConfigManager() (*ConfigManager, error) {
-	exePath, err := os.Executable()
+	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Dir(exePath)
+	
+	appDir := filepath.Join(configDir, "aether-realist")
+	if err := os.MkdirAll(appDir, 0755); err != nil {
+		return nil, err
+	}
+
 	return &ConfigManager{
-		configPath: filepath.Join(dir, ConfigFileName),
+		configPath: filepath.Join(appDir, ConfigFileName),
 	}, nil
 }
 
