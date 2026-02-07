@@ -4,11 +4,11 @@ Aether-Realist 是一套运行于 WebTransport (HTTP/3) 之上的无状态、分
 
 ## 目录结构
 
-- `docs/aether-realist-protocol.md`：协议规范（Record framing / Metadata / Error）。
-- `src/worker.js`：Cloudflare Worker 参考实现。
-- `cmd/aether-client`：Go WebTransport + SOCKS5 客户端。
-- `ui/`：现代化 GUI 配置台（静态前端）。
-- `docs/deployment.md`：部署与密钥配置说明。
+- `docs/aether-realist-protocol.md`：协议规范 (Record framing / Metadata / Error)。
+- `docs/design.md`：架构设计、安全防御与性能优化详解。
+- `docs/deployment.md`：现代化 Docker 编排与 Caddy 网关部署。
+- `cmd/aetherd`：本地后台守护进程 (Go)。
+- `gui/`：基于 Tauri + React 的现代化 GUI 面板。
 
 ## 架构概览
 
@@ -46,26 +46,22 @@ wrangler deploy
 
 Aether-Realist 现在支持独立的 Go 服务端 `aether-gateway`，支持 Docker 部署。
 
-#### Docker 部署 (推荐)
+#### Docker 部署 (生产推荐)
 
-从 GitHub Container Registry 拉取镜像：
+使用我们优化后的编排方案，包含 Caddy 自动化 TLS 和主动探测防御：
 
 ```bash
-docker pull ghcr.io/coolapijust/aether-rea:latest
+cd deploy
+# 编辑 Caddyfile 中的域名
+docker-compose up -d
 ```
 
-启动容器：
-```bash
-docker run -d \
-  --name aether-gateway \
-  -p 4433:4433/udp \
-  -p 4433:4433/tcp \
-  -v /path/to/certs:/certs \
-  ghcr.io/coolapijust/aether-rea:latest \
-  -cert /certs/fullchain.pem \
-  -key /certs/privkey.pem \
-  -psk "your-secret-password"
-```
+该方案将启动三个容器：
+1. **Gateway**: 基于 Caddy 的主动防御网关。
+2. **Decoy Site**: 自动分流非协议流量到伪装站点。
+3. **Backend**: Aether 核心服务端。
+
+详情请参考 [deployment.md](docs/deployment.md)。
 
 #### 云平台部署 (ClawCloud / Cloud Run)
 
