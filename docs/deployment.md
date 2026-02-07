@@ -6,15 +6,24 @@ Aether-Realist 提供了独立的 Docker 镜像，支持 HTTP/3 WebTransport。
 
 ### 启动命令
 
+> [!TIP]
+> **自动 TLS**：如果未提供 `-cert` 和 `-key` 参数，服务端将自动生成内存中的 **自签名证书**。这非常适合测试环境或处于反向代理（如 Caddy）后端的情况。
+
 ```bash
-# 1. 准备 TLS 证书 (fullchain.pem, privkey.pem)
-# 2. 启动容器
+# 方式 A：使用自签名证书（快速测试）
 docker run -d \
   --name aether-gateway \
-  --restart always \
   -p 4433:4433/udp \
   -p 4433:4433/tcp \
+  ghcr.io/coolapijust/aether-rea:latest \
+  -psk "your-strong-password"
+
+# 方式 B：使用自有证书（生产推荐）
+docker run -d \
+  --name aether-gateway \
   -v /path/to/certs:/certs \
+  -p 4433:4433/udp \
+  -p 4433:4433/tcp \
   ghcr.io/coolapijust/aether-rea:latest \
   -cert /certs/fullchain.pem \
   -key /certs/privkey.pem \

@@ -2,11 +2,18 @@ package main
 
 import (
 	"context"
+	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"strings"
@@ -34,10 +41,20 @@ func main() {
 		log.Fatal("PSK is required")
 	}
 
-	// Load TLS certs
-	certs, err := tls.LoadX509KeyPair(*certFile, *keyFile)
-	if err != nil {
-		log.Fatalf("Failed to load certs: %v", err)
+	// Try to load TLS certs, fallback to self-signed
+	var certs tls.Certificate
+	var certErr error
+
+	if *certFile != "" && *keyFile != "" {
+		certs, certErr = tls.LoadX509KeyPair(*certFile, *keyFile)
+	}
+
+	if certErr != nil || (*certFile == "" && *keyFile == "") {
+		log.Printf("No TLS certificates provided or failed to load. Generating self-signed certificate for testing...")
+		certs, certErr = generateSelfSignedCert()
+		if certErr != nil {
+			log.Fatalf("Failed to generate self-signed cert: %v", certErr)
+		}
 	}
 
 	tlsConfig := &tls.Config{
@@ -212,4 +229,37 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64) {
 func writeError(w io.Writer, code uint16, msg string) {
 	record, _ := core.BuildErrorRecord(code, msg)
 	w.Write(record)
+}
+
+func generateSelfSignedCert() (tls.Certificate, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"Aether Edge Relay Self-Signed"},
+		},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().Add(time.Hour * 24 * 365),
+
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	certBuf := &bytes.Buffer{}
+	pem.Encode(certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+
+	keyBuf := &bytes.Buffer{}
+	pem.Encode(keyBuf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+
+	return tls.X509KeyPair(certBuf.Bytes(), keyBuf.Bytes())
 }
