@@ -44,6 +44,7 @@ type clientOptions struct {
 	rotateAfter time.Duration
 	maxPadding  uint16
 	autoIP      bool
+	skipVerify  bool
 }
 
 func main() {
@@ -56,6 +57,7 @@ func main() {
 	var maxPadding uint
 	flag.UintVar(&maxPadding, "max-padding", 128, "maximum random padding per record")
 	flag.BoolVar(&opts.autoIP, "auto-ip", false, "auto select optimized IP from https://ip.v2too.top/")
+	flag.BoolVar(&opts.skipVerify, "skip-verify", false, "skip TLS certificate verification (INSECURE)")
 	flag.Parse()
 	opts.maxPadding = uint16(maxPadding)
 
@@ -139,8 +141,11 @@ func newSessionManager(opts clientOptions) (*sessionManager, error) {
 	}
 
 	dialer := &webtransport.Dialer{
-		TLSClientConfig: (&tlsConfig{serverName: parsed.Hostname()}).toTLSConfig(),
-		QUICConfig:      quicConfig,
+		TLSClientConfig: (&tlsConfig{
+			serverName: parsed.Hostname(),
+			skipVerify: opts.skipVerify,
+		}).toTLSConfig(),
+		QUICConfig: quicConfig,
 	}
 
 	return &sessionManager{
@@ -580,8 +585,13 @@ func (d dummyAddr) String() string  { return string(d) }
 // tlsConfig wraps a minimal TLS config definition to avoid relying on global defaults.
 type tlsConfig struct {
 	serverName string
+	skipVerify bool
 }
 
 func (t *tlsConfig) toTLSConfig() *tls.Config {
-	return &tls.Config{ServerName: t.serverName, NextProtos: []string{http3.NextProtoH3}}
+	return &tls.Config{
+		ServerName:         t.serverName,
+		InsecureSkipVerify: t.skipVerify,
+		NextProtos:         []string{http3.NextProtoH3},
+	}
 }

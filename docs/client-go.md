@@ -16,7 +16,8 @@ go build -o aether-client ./cmd/aether-client
   --psk "$PSK" \
   --listen 127.0.0.1:1080 \
   --rotate 20m \
-  --max-padding 128
+  --max-padding 128 \
+  --skip-verify # 如果服务端使用自签名证书，请务必加上此参数
 ```
 
 ## Anycast 优选 IP
