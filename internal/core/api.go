@@ -240,7 +240,20 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 		c.SetSystemProxy(true)
 	}
 	
-	if c.stateMachine.State() == StateActive {
+	currentState := c.stateMachine.State()
+	if currentState == StateIdle || currentState == StateError {
+		// Recover from error state if needed
+		if currentState == StateError {
+			if err := c.stateMachine.Transition(StateIdle); err != nil {
+				return err
+			}
+		}
+
+		if config.URL != "" {
+			// Auto-start if we have a valid config now
+			return c.Start(config)
+		}
+	} else if currentState == StateActive {
 		// If already active, we might need to reconnect session
 		if c.sessionMgr != nil {
 			go c.Rotate()
