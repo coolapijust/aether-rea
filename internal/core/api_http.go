@@ -22,19 +22,19 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 }
 
 // GetRules returns current rules
-func (c *Core) GetRules() []Rule {
+func (c *Core) GetRules() []*Rule {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	
 	if c.ruleEngine == nil {
-		return []Rule{}
+		return []*Rule{}
 	}
 	
 	return c.ruleEngine.GetRules()
 }
 
 // UpdateRules updates all rules
-func (c *Core) UpdateRules(rules []Rule) error {
+func (c *Core) UpdateRules(rules []*Rule) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	

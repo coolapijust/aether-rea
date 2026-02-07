@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/armon/go-socks5"
 )
@@ -147,9 +148,9 @@ func (c *streamConn) Close() error {
 
 func (c *streamConn) LocalAddr() net.Addr  { return c.local }
 func (c *streamConn) RemoteAddr() net.Addr { return c.remote }
-func (c *streamConn) SetDeadline(t interface{}) error       { return nil }
-func (c *streamConn) SetReadDeadline(t interface{}) error   { return nil }
-func (c *streamConn) SetWriteDeadline(t interface{}) error  { return nil }
+func (c *streamConn) SetDeadline(t time.Time) error       { return nil }
+func (c *streamConn) SetReadDeadline(t time.Time) error   { return nil }
+func (c *streamConn) SetWriteDeadline(t time.Time) error  { return nil }
 
 type dummyAddr string
 

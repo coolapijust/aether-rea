@@ -65,6 +65,7 @@ func (s *Subscription) Cancel() {
 type Core struct {
 	stateMachine *StateMachine
 	config       *SessionConfig
+	editingConfig SessionConfig
 	handlers     map[string]EventHandler
 	handlerMu    sync.RWMutex
 	subCounter   int64
@@ -193,7 +194,7 @@ func (c *Core) Subscribe(handler EventHandler) *Subscription {
 }
 
 // GetState returns current FSM state (for initialization recovery only, do not poll).
-func (c *Core) GetState() CoreState {
+func (c *Core) GetState() string {
 	return string(c.stateMachine.State())
 }
 

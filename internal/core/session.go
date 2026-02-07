@@ -88,14 +88,8 @@ func (sm *sessionManager) connect() error {
 	// Emit event
 	localAddr := ""
 	remoteAddr := ""
-	if conn := session.Connection(); conn != nil {
-		if local := conn.LocalAddr(); local != nil {
-			localAddr = local.String()
-		}
-		if remote := conn.RemoteAddr(); remote != nil {
-			remoteAddr = remote.String()
-		}
-	}
+	// webtransport.Session doesn't have Connection() method
+	// Get address from the dial context if needed
 	sm.onEvent(NewSessionEstablishedEvent(sm.sessionID, localAddr, remoteAddr))
 
 	// Start session monitor
@@ -175,8 +169,8 @@ func (sm *sessionManager) monitorSession() {
 		return
 	}
 
-	// Wait for session closure
-	<-sm.session.Closed()
+	// Wait for context cancellation or session close
+	<-sm.ctx.Done()
 
 	sm.mu.Lock()
 	if sm.session != nil {

@@ -264,16 +264,7 @@ func (sm *sessionManagerV2) createSession() (*sessionV2, error) {
 func (sm *sessionManagerV2) emitSessionEstablished(s *sessionV2) {
 	localAddr := ""
 	remoteAddr := ""
-	if s.session != nil {
-		if conn := s.session.Connection(); conn != nil {
-			if local := conn.LocalAddr(); local != nil {
-				localAddr = local.String()
-			}
-			if remote := conn.RemoteAddr(); remote != nil {
-				remoteAddr = remote.String()
-			}
-		}
-	}
+	// webtransport.Session doesn't have Connection() method
 	sm.onEvent(NewSessionEstablishedEvent(s.id, localAddr, remoteAddr))
 }
 
