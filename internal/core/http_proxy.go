@@ -1,13 +1,11 @@
 package core
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"strings"
 )
 
 // HttpProxyServer wraps the HTTP proxy server.
