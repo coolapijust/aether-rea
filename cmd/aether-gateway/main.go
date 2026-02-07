@@ -107,6 +107,14 @@ func main() {
 	}
 
 	http.HandleFunc(*secretPath, func(w http.ResponseWriter, r *http.Request) {
+		// Decoy: If not a WebTransport upgrade request, return a standard API 401
+		if r.Header.Get("Upgrade") != "webtransport" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"code": 40101, "message": "Invalid authentication token", "status": "error"}`))
+			return
+		}
+
 		session, err := server.Upgrade(w, r)
 		if err != nil {
 			log.Printf("Upgrade failed: %v", err)
@@ -117,16 +125,25 @@ func main() {
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Aether Edge Relay</title>
-  </head>
-  <body>
-    <h1>Aether Edge Relay</h1>
-    <p>Operational</p>
-  </body>
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(`<!DOCTYPE html>
+<html>
+<head>
+    <title>API Gateway Service</title>
+    <style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.6;color:#333}h1{border-bottom:1px solid #eaeaea;padding-bottom:10px}.status{display:inline-block;padding:5px 10px;background:#e1f5fe;color:#0277bd;border-radius:4px;font-size:14px}pre{background:#f6f8fa;padding:15px;border-radius:6px;overflow-x:auto}</style>
+</head>
+<body>
+    <h1>API Gateway Service</h1>
+    <p><span class="status">System Operational</span></p>
+    <p>This is a secure API gateway endpoint. Unauthorized access is monitored.</p>
+    <h3>Endpoint Status</h3>
+    <ul>
+        <li><strong>Sync Service:</strong> <span style="color:green">Active</span></li>
+        <li><strong>Discovery:</strong> <span style="color:orange">Restricted</span></li>
+    </ul>
+    <p>For API documentation, please refer to the internal developer portal.</p>
+    <footer>&copy; 2024 API Gateway System v2.1.0</footer>
+</body>
 </html>`))
 	})
 
