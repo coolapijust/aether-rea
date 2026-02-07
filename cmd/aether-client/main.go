@@ -222,7 +222,28 @@ func (m *sessionManager) dialSession(ctx context.Context) (*webtransport.Session
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	_, sess, err := m.dialer.Dial(ctx, m.url.String(), nil)
+	// Determine the URL to dial
+	dialURL := m.url.String()
+	
+	// If dialAddr is specified, construct URL with override address
+	if m.opts.dialAddr != "" {
+		// Parse dialAddr to ensure it has port
+		host, port, err := net.SplitHostPort(m.opts.dialAddr)
+		if err != nil {
+			// If no port specified, add default 443
+			if strings.Contains(err.Error(), "missing port in address") {
+				m.opts.dialAddr = net.JoinHostPort(m.opts.dialAddr, "443")
+			}
+			host, port, _ = net.SplitHostPort(m.opts.dialAddr)
+		}
+		
+		// Construct new URL with override host:port
+		parsedCopy := *m.url
+		parsedCopy.Host = net.JoinHostPort(host, port)
+		dialURL = parsedCopy.String()
+	}
+
+	_, sess, err := m.dialer.Dial(ctx, dialURL, nil)
 	if err != nil {
 		return nil, err
 	}
