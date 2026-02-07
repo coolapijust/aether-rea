@@ -1,6 +1,6 @@
 # Aether-Realist
 
-Aether-Realist 是一套运行于 WebTransport (HTTP/3) 之上的无状态、分段式、可配置边缘中转协议。该仓库包含协议规范、Cloudflare Worker 参考实现、Go 客户端与 GUI 配置台。
+Aether-Realist 是一套运行于 WebTransport (HTTP/3) 之上的无状态、分段式、可配置边缘中转协议。该仓库包含协议规范、Cloudflare Worker 参考实现、Go 客户端与 GUI 配置台。需要等待Cloudflare Worker原生支持WebTransport 才可使用。
 
 ## 目录结构
 
