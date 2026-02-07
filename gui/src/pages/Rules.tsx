@@ -53,7 +53,7 @@ export default function Rules() {
                 }
                 label="国内网站直连"
               />
-              
+
               <FormControlLabel
                 control={
                   <Switch
@@ -65,7 +65,7 @@ export default function Rules() {
               />
 
               <Divider />
-              
+
               <Typography variant="subtitle2" color="text.secondary">
                 自定义规则 (Geo/Domain/IP)
               </Typography>
@@ -84,7 +84,7 @@ export default function Rules() {
                 control={
                   <Switch
                     checked={editingConfig.rotation.enabled}
-                    onChange={(e) => 
+                    onChange={(e) =>
                       updateEditingConfig({
                         rotation: { ...editingConfig.rotation, enabled: e.target.checked }
                       })
@@ -151,7 +151,7 @@ export default function Rules() {
                 onChange={(e) => updateEditingConfig({ url: e.target.value })}
                 fullWidth
               />
-              
+
               <TextField
                 label="PSK (预共享密钥)"
                 type="password"
@@ -159,14 +159,21 @@ export default function Rules() {
                 onChange={(e) => updateEditingConfig({ psk: e.target.value })}
                 fullWidth
               />
-              
+
               <TextField
-                label="监听地址"
+                label="SOCKS5 监听地址"
                 value={editingConfig.listenAddr}
                 onChange={(e) => updateEditingConfig({ listenAddr: e.target.value })}
                 fullWidth
               />
-              
+
+              <TextField
+                label="HTTP 监听地址"
+                value={editingConfig.httpProxyAddr}
+                onChange={(e) => updateEditingConfig({ httpProxyAddr: e.target.value })}
+                fullWidth
+              />
+
               <TextField
                 label="最大填充 (bytes)"
                 type="number"
@@ -178,8 +185,8 @@ export default function Rules() {
           )}
 
           {hasUnsavedChanges && (
-            <Alert 
-              severity="info" 
+            <Alert
+              severity="info"
               sx={{ mt: 3 }}
               action={
                 <Button

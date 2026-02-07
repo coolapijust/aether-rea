@@ -4,10 +4,18 @@ package systemproxy
 
 import "fmt"
 
-func EnableSocksProxy(address string) error {
+func EnableProxy(address string, isHttp bool) error {
 	return fmt.Errorf("system proxy not supported on this platform")
 }
 
-func DisableSocksProxy() error {
+func DisableProxy() error {
 	return fmt.Errorf("system proxy not supported on this platform")
+}
+
+func EnableSocksProxy(address string) error {
+	return EnableProxy(address, false)
+}
+
+func DisableSocksProxy() error {
+	return DisableProxy()
 }

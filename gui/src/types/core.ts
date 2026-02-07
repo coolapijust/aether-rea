@@ -125,6 +125,7 @@ export interface CoreConfig {
   url: string;
   psk: string;
   listenAddr: string;
+  httpProxyAddr: string;
   dialAddr?: string;
   maxPadding: number;
   rotation: {

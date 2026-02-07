@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-func EnableSocksProxy(address string) error {
+// EnableProxy enables the system proxy.
+func EnableProxy(address string, isHttp bool) error {
 	host, port, err := NormalizeAddress(address)
 	if err != nil {
 		return err
@@ -18,27 +19,54 @@ func EnableSocksProxy(address string) error {
 		return err
 	}
 	for _, service := range services {
-		if err := exec.Command("networksetup", "-setsocksfirewallproxy", service, host, port).Run(); err != nil {
-			return fmt.Errorf("set proxy for %s: %w", service, err)
-		}
-		if err := exec.Command("networksetup", "-setsocksfirewallproxystate", service, "on").Run(); err != nil {
-			return fmt.Errorf("enable proxy for %s: %w", service, err)
+		if isHttp {
+			// Set HTTP proxy
+			if err := exec.Command("networksetup", "-setwebproxy", service, host, port).Run(); err != nil {
+				return fmt.Errorf("set http proxy for %s: %w", service, err)
+			}
+			if err := exec.Command("networksetup", "-setwebproxystate", service, "on").Run(); err != nil {
+				return fmt.Errorf("enable http proxy for %s: %w", service, err)
+			}
+			// Set HTTPS proxy
+			if err := exec.Command("networksetup", "-setsecurewebproxy", service, host, port).Run(); err != nil {
+				return fmt.Errorf("set https proxy for %s: %w", service, err)
+			}
+			if err := exec.Command("networksetup", "-setsecurewebproxystate", service, "on").Run(); err != nil {
+				return fmt.Errorf("enable https proxy for %s: %w", service, err)
+			}
+		} else {
+			// Set SOCKS proxy
+			if err := exec.Command("networksetup", "-setsocksfirewallproxy", service, host, port).Run(); err != nil {
+				return fmt.Errorf("set socks proxy for %s: %w", service, err)
+			}
+			if err := exec.Command("networksetup", "-setsocksfirewallproxystate", service, "on").Run(); err != nil {
+				return fmt.Errorf("enable socks proxy for %s: %w", service, err)
+			}
 		}
 	}
 	return nil
 }
 
-func DisableSocksProxy() error {
+// DisableProxy disables the system proxy.
+func DisableProxy() error {
 	services, err := listNetworkServices()
 	if err != nil {
 		return err
 	}
 	for _, service := range services {
-		if err := exec.Command("networksetup", "-setsocksfirewallproxystate", service, "off").Run(); err != nil {
-			return fmt.Errorf("disable proxy for %s: %w", service, err)
-		}
+		exec.Command("networksetup", "-setwebproxystate", service, "off").Run()
+		exec.Command("networksetup", "-setsecurewebproxystate", service, "off").Run()
+		exec.Command("networksetup", "-setsocksfirewallproxystate", service, "off").Run()
 	}
 	return nil
+}
+
+func EnableSocksProxy(address string) error {
+	return EnableProxy(address, false)
+}
+
+func DisableSocksProxy() error {
+	return DisableProxy()
 }
 
 func listNetworkServices() ([]string, error) {

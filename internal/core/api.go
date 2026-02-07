@@ -17,6 +17,7 @@ type SessionConfig struct {
 	URL            string         `json:"url"`                // https://host/path
 	PSK            string         `json:"psk"`                // Pre-shared key
 	ListenAddr     string         `json:"listenAddr"`         // SOCKS5 listen address
+	HttpProxyAddr  string         `json:"httpProxyAddr"`      // HTTP proxy listen address
 	DialAddr       string         `json:"dialAddr,omitempty"` // Override dial address (optional)
 	MaxPadding     int            `json:"maxPadding,omitempty"` // 0-65535, default 0
 	Rotation       RotationConfig `json:"rotation,omitempty"`   // Session rotation policy
@@ -80,6 +81,7 @@ type Core struct {
 	// Internal components (not exposed)
 	sessionMgr   *sessionManager
 	socksServer  *socks5Server
+	httpProxyServer *HttpProxyServer
 	metrics      *Metrics
 	metricsCollector *MetricsCollector
 	streams      map[string]*StreamInfo
@@ -354,15 +356,28 @@ func (c *Core) SetSystemProxy(enabled bool) error {
 	defer c.mu.Unlock()
 
 	if enabled {
-		if c.config == nil || c.config.ListenAddr == "" {
-			return fmt.Errorf("no listen address configured")
+	if enabled {
+		if c.config == nil {
+			return fmt.Errorf("no config loaded")
 		}
-		if err := systemproxy.EnableSocksProxy(c.config.ListenAddr); err != nil {
+		
+		addr := c.config.HttpProxyAddr
+		isHttp := true
+		if addr == "" {
+			addr = c.config.ListenAddr
+			isHttp = false
+		}
+		
+		if addr == "" {
+			return fmt.Errorf("no proxy address configured")
+		}
+		
+		if err := systemproxy.EnableProxy(addr, isHttp); err != nil {
 			return err
 		}
 		c.systemProxyEnabled = true
 	} else {
-		if err := systemproxy.DisableSocksProxy(); err != nil {
+		if err := systemproxy.DisableProxy(); err != nil {
 			return err
 		}
 		c.systemProxyEnabled = false
@@ -416,8 +431,17 @@ func (c *Core) initialize() error {
 	}
 
 	c.socksServer = newSocks5Server(c.config.ListenAddr, c)
-	if err := c.socksServer.start(); err != nil {
-		return err
+	if c.socksServer != nil {
+		if err := c.socksServer.start(); err != nil {
+			return err
+		}
+	}
+
+	if c.config.HttpProxyAddr != "" {
+		c.httpProxyServer = newHttpProxyServer(c.config.HttpProxyAddr, c)
+		if err := c.httpProxyServer.Start(); err != nil {
+			return err
+		}
 	}
 
 	go c.runEventLoop()
@@ -435,6 +459,9 @@ func (c *Core) cleanup() {
 
 	if c.socksServer != nil {
 		c.socksServer.stop()
+	}
+	if c.httpProxyServer != nil {
+		c.httpProxyServer.Stop()
 	}
 	if c.sessionMgr != nil {
 		c.sessionMgr.close("cleanup")

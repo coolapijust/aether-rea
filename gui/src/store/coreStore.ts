@@ -83,6 +83,7 @@ const defaultConfig: CoreConfig = {
   url: '',
   psk: '',
   listenAddr: '127.0.0.1:1080',
+  httpProxyAddr: '127.0.0.1:1081',
   maxPadding: 128,
   rotation: {
     enabled: true,

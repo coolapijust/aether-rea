@@ -17,6 +17,7 @@ import (
 func main() {
 	var (
 		listenAddr = flag.String("listen", "127.0.0.1:1080", "SOCKS5 listen address")
+		httpAddr   = flag.String("http", "", "HTTP proxy listen address (e.g. 127.0.0.1:1081)")
 		apiAddr    = flag.String("api", "127.0.0.1:9880", "HTTP API listen address")
 		configFile = flag.String("config", "", "Config file path")
 		url        = flag.String("url", "", "WebTransport endpoint URL")
@@ -34,9 +35,10 @@ func main() {
 
 	// Prepare config
 	config := core.SessionConfig{
-		ListenAddr: *listenAddr,
-		URL:        *url,
-		PSK:        *psk,
+		ListenAddr:    *listenAddr,
+		HttpProxyAddr: *httpAddr,
+		URL:           *url,
+		PSK:           *psk,
 	}
 
 	// Load persisted config
@@ -52,12 +54,13 @@ func main() {
 			if *psk == "" && loaded.PSK != "" {
 				config.PSK = loaded.PSK
 			}
-			// Keep flag listen addr if specified differently? 
-			// Actually better to respect saved config for all fields if available
-			// But flags are useful for overriding.
-			// Let's copy saved fields if flags are empty/default
+			
 			if loaded.ListenAddr != "" && *listenAddr == "127.0.0.1:1080" {
 				config.ListenAddr = loaded.ListenAddr
+			}
+			
+			if *httpAddr == "" && loaded.HttpProxyAddr != "" {
+				config.HttpProxyAddr = loaded.HttpProxyAddr
 			}
 		}
 	}

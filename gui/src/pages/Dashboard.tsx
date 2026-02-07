@@ -6,6 +6,7 @@ import {
   Button,
   Chip,
   Grid,
+  Divider,
 } from '@mui/material';
 import {
   PowerSettingsNew as PowerIcon,
@@ -116,6 +117,13 @@ export default function Dashboard() {
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                   节点: {currentSession?.remoteAddr || '-'}
                 </Typography>
+                <Divider sx={{ my: 1, opacity: 0.5 }} />
+                <Typography variant="body2" color="text.secondary">
+                  SOCKS5: {useCoreStore.getState().currentConfig.listenAddr}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  HTTP: {useCoreStore.getState().currentConfig.httpProxyAddr}
+                </Typography>
               </Box>
             </CardContent>
           </Card>
@@ -155,7 +163,7 @@ export default function Dashboard() {
 
               <Typography variant="h3" sx={{ fontWeight: 600, mb: 1 }}>
                 {metricsHistory.length > 0
-                  ? `${metricsHistory[metricsHistory.length - 1].latencyMs || '-'}ms`
+                  ? `${metricsHistory[metricsHistory.length - 1].latencyMs || '-'} ms`
                   : '-'
                 }
               </Typography>
@@ -198,7 +206,7 @@ export default function Dashboard() {
                     <YAxis
                       tick={{ fontSize: 12 }}
                       tickLine={false}
-                      tickFormatter={(v) => `${v.toFixed(0)}M`}
+                      tickFormatter={(v) => `${v.toFixed(0)} M`}
                     />
                     <Area
                       type="monotone"
