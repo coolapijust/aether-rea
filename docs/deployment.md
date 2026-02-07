@@ -1,6 +1,36 @@
-# 部署与环境配置（Cloudflare）
+# 部署与环境配置
 
-## Wrangler 配置
+## 1. Aether Gateway (Docker - 推荐)
+
+Aether-Realist 提供了独立的 Docker 镜像，支持 HTTP/3 WebTransport。
+
+### 启动命令
+
+```bash
+# 1. 准备 TLS 证书 (fullchain.pem, privkey.pem)
+# 2. 启动容器
+docker run -d \
+  --name aether-gateway \
+  --restart always \
+  -p 4433:4433/udp \
+  -p 4433:4433/tcp \
+  -v /path/to/certs:/certs \
+  ghcr.io/coolapijust/aether-rea:latest \
+  -cert /certs/fullchain.pem \
+  -key /certs/privkey.pem \
+  -psk "your-strong-password"
+```
+
+### 必需参数
+- `-cert`: TLS 证书文件路径。
+- `-key`: TLS 私钥文件路径。
+- `-psk`: 预共享密钥，客户端连接时需一致。
+
+---
+
+## 2. Cloudflare Worker 配置 (Legacy)
+
+### Wrangler 配置
 
 在项目根目录添加 `wrangler.toml`，并启用 `nodejs_compat`：
 
@@ -17,7 +47,7 @@ SECRET_PATH = "/v1/api/sync"
 - `SECRET_PATH` 用于控制 WebTransport 入口路径。
 - 根路径 `/` 将返回静态页面以满足伪装需求。
 
-## Secret 管理
+### Secret 管理
 
 `PSK` 必须通过 Wrangler secret 设置：
 

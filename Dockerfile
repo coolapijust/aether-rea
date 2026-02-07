@@ -15,8 +15,8 @@ COPY go.sum* ./
 COPY . .
 
 # Download dependencies
-# Force clean go.sum if needed in docker context? 
-# In CI we delete it. Here we just tidy.
+# Force clean go.sum to avoid checksum mismatch due to platform differences
+RUN rm -f go.sum
 RUN go mod tidy
 
 # Build the binary
