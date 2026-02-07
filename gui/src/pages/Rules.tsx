@@ -33,7 +33,7 @@ export default function Rules() {
       <Card>
         <Tabs
           value={activeTab}
-          onChange={(e, v) => setActiveTab(v)}
+          onChange={(_, v) => setActiveTab(v)}
           sx={{ borderBottom: 1, borderColor: 'divider' }}
         >
           <Tab label="分流规则" />
