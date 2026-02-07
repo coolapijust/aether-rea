@@ -5,7 +5,9 @@ on:
     paths:
       - "cmd/aether-client/**"
       - "cmd/aether-studio/**"
-      - "internal/systemproxy/**"
+      - "cmd/geo-test/**"
+      - "gui/**"
+      - "internal/**"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/build-client.yml"
@@ -13,6 +15,7 @@ on:
 
 env:
   GO_VERSION: "1.21"
+  NODE_VERSION: "20"
 
 jobs:
   build-aether-client:
@@ -34,70 +37,115 @@ jobs:
           name: aether-client-windows
           path: aether-client.exe
 
-  # 使用 Ubuntu + 交叉编译工具链
-  build-aether-studio:
-    runs-on: ubuntu-latest
+  build-aether-gui:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: aether-gui-linux
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: aether-gui-windows
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: aether-gui-macos
+
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: gui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: gui
+        run: npm ci
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Tauri dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Build GUI
+        working-directory: gui
+        run: npm run tauri:build
+
+      - name: Upload artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: gui/src-tauri/target/release/aether-gui.exe
+
+      - name: Upload artifact (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: gui/src-tauri/target/release/bundle/deb/*.deb
+
+      - name: Upload artifact (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: gui/src-tauri/target/release/bundle/dmg/*.dmg
+
+  build-aether-studio:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-glfw
+            mingw-w64-x86_64-glew
+            mingw-w64-x86_64-mesa
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # 安装 MinGW 交叉编译器
-      - name: Install MinGW
+      - name: Clear module cache
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64 g++-mingw-w64-x86-64
+          go clean -modcache
+          Remove-Item -Force -ErrorAction SilentlyContinue go.sum
 
-      # 安装 Windows 版 GLFW 和 OpenGL 依赖
-      - name: Install Windows deps
+      - name: Download dependencies
+        shell: pwsh
         run: |
-          sudo apt-get install -y mingw-w64-x86-64-dev
-          # 下载 GLFW Windows 库
-          wget -q https://github.com/glfw/glfw/releases/download/3.4/glfw-3.4.bin.WIN64.zip
-          unzip -q glfw-3.4.bin.WIN64.zip
-          sudo mkdir -p /usr/x86_64-w64-mingw32/include
-          sudo mkdir -p /usr/x86_64-w64-mingw32/lib
-          sudo cp glfw-3.4.bin.WIN64/include/GLFW/* /usr/x86_64-w64-mingw32/include/
-          sudo cp glfw-3.4.bin.WIN64/lib-mingw-w64/libglfw3.a /usr/x86_64-w64-mingw32/lib/
-          sudo cp glfw-3.4.bin.WIN64/lib-mingw-w64/libglfw3dll.a /usr/x86_64-w64-mingw32/lib/
-
-      # 缓存 Go modules
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-mod-${{ runner.os }}-
-
-      - name: Prepare build
-        run: |
-          rm -f go.sum
-          export CGO_ENABLED=1
-          export GOOS=windows
-          export GOARCH=amd64
-          export CC=x86_64-w64-mingw32-gcc
-          export CXX=x86_64-w64-mingw32-g++
-          export CGO_CFLAGS="-I/usr/x86_64-w64-mingw32/include"
-          export CGO_LDFLAGS="-L/usr/x86_64-w64-mingw32/lib -lglfw3 -lopengl32 -lgdi32"
+          $env:GOPROXY = "https://proxy.golang.org,direct"
           go mod tidy
+          go mod download
 
-      - name: Build Windows executable
+      - name: Build Windows EXE
+        shell: pwsh
         run: |
-          export CGO_ENABLED=1
-          export GOOS=windows
-          export GOARCH=amd64
-          export CC=x86_64-w64-mingw32-gcc
-          export CGO_LDFLAGS="-L/usr/x86_64-w64-mingw32/lib -lglfw3 -lopengl32 -lgdi32"
+          $env:CGO_ENABLED = "1"
+          $env:CC = "gcc"
+          $env:CGO_LDFLAGS = "-L/mingw64/lib -lglfw3 -lglew32 -lopengl32 -lgdi32"
           echo "Starting build..."
-          # 后台输出心跳，防止 GitHub Actions 认为卡住
-          (while true; do echo "[$(date +%H:%M:%S)] Compiling..."; sleep 30; done) &
-          HEARTBEAT=$!
           go build -v -p 1 -ldflags="-H=windowsgui" -o aether-studio.exe ./cmd/aether-studio
-          kill $HEARTBEAT 2>/dev/null || true
           echo "Build complete!"
 
       - name: Upload artifact
