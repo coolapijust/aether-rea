@@ -67,6 +67,10 @@ docker run -d \
   -psk "your-secret-password"
 ```
 
+#### 云平台部署 (ClawCloud / Cloud Run)
+
+由于支持 `$PORT` 环境变量和自动自签名证书，本服务可直接部署于容器托管平台。详情请参考 [deployment.md](docs/deployment.md#4-云平台部署-clawcloud--cloud-run--paas)。
+
 #### 手动编译
 
 ```bash

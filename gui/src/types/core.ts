@@ -1,15 +1,15 @@
 // Core API Types - 与后端 Core API 严格对齐
 
-export type CoreState = 
-  | 'Idle' 
-  | 'Starting' 
-  | 'Active' 
-  | 'Rotating' 
-  | 'Closing' 
-  | 'Closed' 
+export type CoreState =
+  | 'Idle'
+  | 'Starting'
+  | 'Active'
+  | 'Rotating'
+  | 'Closing'
+  | 'Closed'
   | 'Error';
 
-export type CoreEventType = 
+export type CoreEventType =
   | 'core.stateChanged'
   | 'session.established'
   | 'session.rotating'
@@ -19,7 +19,8 @@ export type CoreEventType =
   | 'stream.error'
   | 'core.error'
   | 'metrics.snapshot'
-  | 'rotation.scheduled';
+  | 'rotation.scheduled'
+  | 'app.log';
 
 export interface CoreEvent {
   type: CoreEventType;
@@ -91,7 +92,14 @@ export interface RotationScheduledEvent extends CoreEvent {
   maxInterval: number;
 }
 
-export type AnyCoreEvent = 
+export interface AppLogEvent extends CoreEvent {
+  type: 'app.log';
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  source?: string;
+}
+
+export type AnyCoreEvent =
   | StateChangedEvent
   | SessionEstablishedEvent
   | SessionRotatingEvent
@@ -100,7 +108,8 @@ export type AnyCoreEvent =
   | StreamClosedEvent
   | CoreErrorEvent
   | MetricsSnapshotEvent
-  | RotationScheduledEvent;
+  | RotationScheduledEvent
+  | AppLogEvent;
 
 export interface StreamInfo {
   id: string;

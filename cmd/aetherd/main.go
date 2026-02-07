@@ -4,6 +4,7 @@ package main
 
 import (
 	"flag"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -21,10 +22,13 @@ func main() {
 	)
 	flag.Parse()
 
-	log.Println("Starting Aether-Realist Daemon...")
-
 	// Create Core
 	c := core.New()
+
+	// Redirect logs to both stdout and Core event stream
+	log.SetOutput(io.MultiWriter(os.Stdout, c.GetLogWriter()))
+
+	log.Println("Starting Aether-Realist Daemon...")
 
 	// Prepare config
 	config := core.SessionConfig{

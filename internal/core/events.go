@@ -228,6 +228,24 @@ func NewRotationCompletedEvent(oldID, newID string, drainingTime time.Duration) 
 	}
 }
 
+// Event: app.log
+// Fires when a new log entry is generated.
+type AppLogEvent struct {
+	baseEvent
+	Level   string `json:"level"` // "info", "warn", "error"
+	Message string `json:"message"`
+	Source  string `json:"source,omitempty"`
+}
+
+func NewAppLogEvent(level, message, source string) Event {
+	return AppLogEvent{
+		baseEvent: baseEvent{Type: "app.log", Timestamp: time.Now().UnixMilli()},
+		Level:     level,
+		Message:   message,
+		Source:    source,
+	}
+}
+
 // Error codes from Aether-Realist Protocol V3 Section 7.2
 const (
 	ErrBadRecord      = "ERR_BAD_RECORD"

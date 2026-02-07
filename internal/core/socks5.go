@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -40,23 +41,53 @@ func (s *socks5Server) start() error {
 				return nil, err
 			}
 			
-			// Open stream through Core
+			// Rule matching
 			target := TargetAddress{Host: host, Port: int(port)}
-			handle, err := s.core.OpenStream(target, nil)
-			if err != nil {
-				s.core.emit(NewCoreErrorEvent(ErrTargetConnect, err.Error(), false))
-				return nil, err
+			var action ActionType = ActionProxy
+			var ruleID string
+			
+			if s.core.ruleEngine != nil {
+				req := &MatchRequest{
+					Domain: host,
+					Port:   int(port),
+				}
+				
+				// Optional: Resolve IP if needed for IP matching
+				if ip := net.ParseIP(host); ip != nil {
+					req.IP = ip
+				}
+				
+				res, err := s.core.ruleEngine.Match(req)
+				if err == nil {
+					action = res.Action
+					ruleID = res.RuleID
+				}
 			}
 			
-			// Get stream from registry
-			conn := &streamConn{
-				handle:  handle,
-				core:    s.core,
-				local:   dummyAddr("socks-local"),
-				remote:  dummyAddr(fmt.Sprintf("%s:%d", host, port)),
+			switch action {
+			case ActionDirect:
+				return net.Dial(network, addr)
+				
+			case ActionBlock, ActionReject:
+				return nil, fmt.Errorf("blocked by rule: %s", ruleID)
+				
+			case ActionProxy:
+				fallthrough
+			default:
+				// Open stream through Core
+				handle, err := s.core.OpenStream(target, nil)
+				if err != nil {
+					s.core.emit(NewCoreErrorEvent(ErrTargetConnect, err.Error(), false))
+					return nil, err
+				}
+				
+				return &streamConn{
+					handle:  handle,
+					core:    s.core,
+					local:   dummyAddr("socks-local"),
+					remote:  dummyAddr(fmt.Sprintf("%s:%d", host, port)),
+				}, nil
 			}
-			
-			return conn, nil
 		},
 	}
 
@@ -129,13 +160,65 @@ type streamConn struct {
 }
 
 func (c *streamConn) Read(p []byte) (int, error) {
-	// TODO: Implement reading from stream through Core
-	return 0, fmt.Errorf("not implemented")
+	if c.reader == nil {
+		stream, ok := c.core.GetUnderlyingStream(c.handle)
+		if !ok {
+			return 0, fmt.Errorf("stream not found")
+		}
+		c.reader = NewRecordReader(stream)
+	}
+	
+	for {
+		record, err := c.reader.ReadNextRecord()
+		if err != nil {
+			return 0, err
+		}
+		
+		if record.Type == TypeError {
+			return 0, fmt.Errorf("server error: %s", record.ErrorMessage)
+		}
+		
+		if record.Type == TypeData {
+			n := copy(p, record.Payload)
+			if c.core.metrics != nil {
+				c.core.metrics.RecordBytesReceived(uint64(n))
+			}
+			return n, nil
+		}
+		// Ignore other types for now
+	}
 }
 
 func (c *streamConn) Write(p []byte) (int, error) {
-	// TODO: Implement writing to stream through Core
-	return len(p), nil
+	stream, ok := c.core.GetUnderlyingStream(c.handle)
+	if !ok {
+		return 0, fmt.Errorf("stream not found")
+	}
+
+	maxPadding := uint16(0)
+	if c.core.config != nil {
+		maxPadding = uint16(c.core.config.MaxPadding)
+	}
+
+	record, err := BuildDataRecord(p, maxPadding)
+	if err != nil {
+		return 0, err
+	}
+	
+	n, err := stream.Write(record)
+	if err != nil {
+		return 0, err
+	}
+	
+	if c.core.metrics != nil {
+		c.core.metrics.RecordBytesSent(uint64(len(p)))
+	}
+
+	// Correctly return the number of bytes from the original payload
+	if n > 0 {
+		return len(p), nil
+	}
+	return 0, io.EOF
 }
 
 func (c *streamConn) Close() error {

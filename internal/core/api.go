@@ -3,8 +3,12 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
-)
+	"time"
+
+	"aether-rea/internal/systemproxy"
+
 
 // SessionConfig is JSON-serializable configuration for Core.
 type SessionConfig struct {
@@ -72,25 +76,29 @@ type Core struct {
 	mu           sync.RWMutex
 	
 	// Internal components (not exposed)
-	sessionMgr       *sessionManager
-	socksServer      *socks5Server
-	ruleEngine       *RuleEngine
-	metrics          *Metrics
+	sessionMgr   *sessionManager
+	socksServer  *socks5Server
+	metrics      *Metrics
 	metricsCollector *MetricsCollector
-	streams          map[string]*StreamInfo
-	eventBus         chan Event
-	ctx              context.Context
-	cancel           context.CancelFunc
+	streams      map[string]*StreamInfo
+	activeStreams map[string]io.ReadWriteCloser
+	systemProxyEnabled bool
+	ruleEngine   *RuleEngine
+	eventBus     chan Event
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 // New creates a new Core instance.
 func New() *Core {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Core{
-		handlers:   make(map[string]EventHandler),
-		eventBus:   make(chan Event, 100), // Buffered to prevent blocking
-		ctx:        ctx,
-		cancel:     cancel,
+		handlers:      make(map[string]EventHandler),
+		streams:       make(map[string]*StreamInfo),
+		activeStreams: make(map[string]io.ReadWriteCloser),
+		eventBus:      make(chan Event, 100),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 	
 	c.stateMachine = NewStateMachine(func(from, to CoreState) {
@@ -208,8 +216,129 @@ func (c *Core) emit(event Event) {
 	select {
 	case c.eventBus <- event:
 	default:
-		// Channel full, drop event (or log)
+		// Channel full, drop event
 	}
+}
+
+// UpdateConfig updates the core configuration.
+func (c *Core) UpdateConfig(config SessionConfig) error {
+	c.mu.Lock()
+	
+	// Check if listen address changed while system proxy is enabled
+	oldAddr := ""
+	if c.config != nil {
+		oldAddr = c.config.ListenAddr
+	}
+	
+	c.config = &config
+	needsProxyRefresh := c.systemProxyEnabled && oldAddr != config.ListenAddr
+	c.mu.Unlock()
+	
+	if needsProxyRefresh {
+		c.SetSystemProxy(true)
+	}
+	
+	if c.stateMachine.State() == StateActive {
+		// If already active, we might need to reconnect session
+		if c.sessionMgr != nil {
+			go c.Rotate()
+		}
+	}
+	
+	return nil
+}
+
+// GetStreams returns list of active stream info.
+func (c *Core) GetStreams() []*StreamInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	res := make([]*StreamInfo, 0, len(c.streams))
+	for _, s := range c.streams {
+		res = append(res, s)
+	}
+	return res
+}
+
+// GetMetrics returns current metrics snapshot.
+func (c *Core) GetMetrics() Event {
+	if c.metrics == nil {
+		return nil
+	}
+	return c.metrics.Snapshot()
+}
+
+// GetRules returns current routing rules.
+func (c *Core) GetRules() []*Rule {
+	if c.ruleEngine == nil {
+		return nil
+	}
+	return c.ruleEngine.GetRules()
+}
+
+// UpdateRules updates routing rules.
+func (c *Core) UpdateRules(rules []*Rule) error {
+	if c.ruleEngine == nil {
+		return fmt.Errorf("rule engine not initialized")
+	}
+	return c.ruleEngine.UpdateRules(rules)
+}
+
+// IsSystemProxyEnabled returns true if system proxy is active.
+func (c *Core) IsSystemProxyEnabled() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.systemProxyEnabled
+}
+
+// GetLogWriter returns a writer that emits logs as events.
+func (c *Core) GetLogWriter() io.Writer {
+	return &logWriter{core: c}
+}
+
+type logWriter struct {
+	core *Core
+}
+
+func (w *logWriter) Write(p []byte) (n int, err error) {
+	msg := string(p)
+	// Simple level detection
+	level := "info"
+	lowerMsg := strings.ToLower(msg)
+	if strings.Contains(lowerMsg, "error") || strings.Contains(lowerMsg, "failed") {
+		level = "error"
+	} else if strings.Contains(lowerMsg, "warn") {
+		level = "warn"
+	}
+	
+	w.core.emit(NewAppLogEvent(level, strings.TrimSpace(msg), "core"))
+	return len(p), nil
+}
+
+// SetSystemProxy enables or disables the system proxy for this Core's listener.
+func (c *Core) SetSystemProxy(enabled bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if enabled {
+		if c.config == nil || c.config.ListenAddr == "" {
+			return fmt.Errorf("no listen address configured")
+		}
+		if err := systemproxy.EnableSocksProxy(c.config.ListenAddr); err != nil {
+			return err
+		}
+		c.systemProxyEnabled = true
+	} else {
+		if err := systemproxy.DisableSocksProxy(); err != nil {
+			return err
+		}
+		c.systemProxyEnabled = false
+	}
+	
+	// Emit an event (optional, but good for UI)
+	// c.emit(NewProxyStateChangedEvent(c.systemProxyEnabled))
+	
+	return nil
 }
 
 // runEventLoop processes events and dispatches to handlers.
@@ -236,30 +365,144 @@ func (c *Core) runEventLoop() {
 
 // initialize sets up internal components.
 func (c *Core) initialize() error {
-	// TODO: Initialize session manager, socks5 server
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.metrics = &Metrics{}
+	c.metricsCollector = NewMetricsCollector(c.metrics, 1*time.Second, c.emit)
+	c.metricsCollector.Start()
+
+	c.ruleEngine = NewRuleEngine(ActionProxy) // Default to proxy
+
+	c.sessionMgr = newSessionManager(c.config, c.emit, c.metrics)
+	if err := c.sessionMgr.initialize(); err != nil {
+		return err
+	}
+	if err := c.sessionMgr.connect(); err != nil {
+		return err
+	}
+
+	c.socksServer = newSocks5Server(c.config.ListenAddr, c)
+	if err := c.socksServer.start(); err != nil {
+		return err
+	}
+
 	go c.runEventLoop()
 	return nil
 }
 
 // cleanup releases all resources.
 func (c *Core) cleanup() {
-	// TODO: Close all streams, close session, stop socks5 server
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.metricsCollector != nil {
+		c.metricsCollector.Stop()
+	}
+
+	if c.socksServer != nil {
+		c.socksServer.stop()
+	}
+	if c.sessionMgr != nil {
+		c.sessionMgr.close("cleanup")
+	}
+
+	for id, s := range c.activeStreams {
+		s.Close()
+		delete(c.activeStreams, id)
+	}
+	c.streams = make(map[string]*StreamInfo)
 }
 
 // performRotation handles session rotation.
 func (c *Core) performRotation() error {
-	// TODO: Implement rotation logic
-	return nil
+	if c.sessionMgr == nil {
+		return fmt.Errorf("session manager not initialized")
+	}
+	return c.sessionMgr.rotate()
 }
 
 // openStreamInternal creates a stream (protocol internal).
 func (c *Core) openStreamInternal(target TargetAddress, options map[string]interface{}) (StreamHandle, error) {
-	// TODO: Implement stream creation
-	return StreamHandle{ID: "stream-1"}, nil
+	session, streamID, err := c.sessionMgr.getSession(c.ctx)
+	if err != nil {
+		return StreamHandle{}, err
+	}
+
+	stream, err := session.OpenStreamSync(c.ctx)
+	if err != nil {
+		return StreamHandle{}, err
+	}
+
+	// Handshake metadata
+	maxPadding := uint16(c.config.MaxPadding)
+	if v, ok := options["maxPadding"].(float64); ok {
+		maxPadding = uint16(v)
+	}
+
+	metaRecord, err := BuildMetadataRecord(target.Host, uint16(target.Port), maxPadding, c.config.PSK, streamID)
+	if err != nil {
+		stream.Close()
+		return StreamHandle{}, err
+	}
+
+	if _, err := stream.Write(metaRecord); err != nil {
+		stream.Close()
+		return StreamHandle{}, err
+	}
+
+	id := fmt.Sprintf("str-%d-%d", streamID, time.Now().UnixNano())
+	handle := StreamHandle{ID: id}
+
+	info := &StreamInfo{
+		ID:         id,
+		TargetHost: target.Host,
+		TargetPort: target.Port,
+		OpenedAt:   time.Now().UnixMilli(),
+		State:      "Open",
+	}
+
+	c.mu.Lock()
+	c.streams[id] = info
+	c.activeStreams[id] = stream
+	c.mu.Unlock()
+
+	if c.metrics != nil {
+		c.metrics.StreamOpened()
+	}
+
+	c.emit(NewStreamOpenedEvent(id, target))
+
+	return handle, nil
 }
 
 // closeStreamInternal closes a stream.
 func (c *Core) closeStreamInternal(handle StreamHandle) error {
-	// TODO: Implement stream close
-	return nil
+	c.mu.Lock()
+	stream, ok := c.activeStreams[handle.ID]
+	info := c.streams[handle.ID]
+	delete(c.activeStreams, handle.ID)
+	delete(c.streams, handle.ID)
+	c.mu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("stream not found: %s", handle.ID)
+	}
+
+	err := stream.Close()
+	if c.metrics != nil {
+		c.metrics.StreamClosed()
+	}
+	if info != nil {
+		c.emit(NewStreamClosedEvent(handle.ID, info.BytesSent, info.BytesReceived))
+	}
+	return err
+}
+
+// GetUnderlyingStream returns the actual stream object for a handle.
+func (c *Core) GetUnderlyingStream(handle StreamHandle) (io.ReadWriteCloser, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	s, ok := c.activeStreams[handle.ID]
+	return s, ok
 }

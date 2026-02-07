@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   Box,
   Card,
@@ -13,29 +12,31 @@ import {
   Speed as SpeedIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
-import { 
-  LineChart, 
-  Line, 
-  ResponsiveContainer, 
-  XAxis, 
+import {
+  LineChart,
+  Line,
+  ResponsiveContainer,
+  XAxis,
   YAxis,
   Area,
   AreaChart,
 } from 'recharts';
 import { useCoreStore } from '@/store/coreStore';
 import { formatDuration, formatBytes } from '@/utils/format';
+import LogPanel from '@/components/LogPanel';
 
 export default function Dashboard() {
-  const [systemProxyEnabled, setSystemProxyEnabled] = useState(false);
-  const { 
-    connectionState, 
-    coreState, 
-    currentSession, 
+  const {
+    connectionState,
+    coreState,
+    currentSession,
     metricsHistory,
     activeStreamCount,
     totalUpload,
     totalDownload,
     nextRotation,
+    systemProxyEnabled,
+    toggleSystemProxy,
   } = useCoreStore();
 
   const isConnected = connectionState === 'connected' && coreState === 'Active';
@@ -80,21 +81,21 @@ export default function Dashboard() {
               <Typography variant="subtitle1" color="text.secondary" gutterBottom>
                 连接状态
               </Typography>
-              
+
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                 <Box
                   sx={{
                     width: 12,
                     height: 12,
                     borderRadius: '50%',
-                    bgcolor: getStatusColor() === 'success' ? 'success.main' : 
-                             getStatusColor() === 'error' ? 'error.main' :
-                             getStatusColor() === 'warning' ? 'warning.main' : 'text.disabled',
+                    bgcolor: getStatusColor() === 'success' ? 'success.main' :
+                      getStatusColor() === 'error' ? 'error.main' :
+                        getStatusColor() === 'warning' ? 'warning.main' : 'text.disabled',
                     animation: isConnected ? 'pulse 2s infinite' : 'none',
                   }}
                 />
-                <Chip 
-                  label={getStatusText()} 
+                <Chip
+                  label={getStatusText()}
                   color={getStatusColor() as any}
                   size="small"
                 />
@@ -127,7 +128,7 @@ export default function Dashboard() {
               <Typography variant="subtitle1" color="text.secondary" gutterBottom>
                 流量统计
               </Typography>
-              
+
               <Box sx={{ mb: 2 }}>
                 <Typography variant="h4" color="primary.main" sx={{ fontWeight: 600 }}>
                   ↑ {formatBytes(totalUpload)}
@@ -151,9 +152,9 @@ export default function Dashboard() {
               <Typography variant="subtitle1" color="text.secondary" gutterBottom>
                 延迟
               </Typography>
-              
+
               <Typography variant="h3" sx={{ fontWeight: 600, mb: 1 }}>
-                {metricsHistory.length > 0 
+                {metricsHistory.length > 0
                   ? `${metricsHistory[metricsHistory.length - 1].latencyMs || '-'}ms`
                   : '-'
                 }
@@ -163,10 +164,10 @@ export default function Dashboard() {
                 <Box sx={{ height: 60 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={chartData.slice(-10)}>
-                      <Line 
-                        type="monotone" 
-                        dataKey="latency" 
-                        stroke="#3b82f6" 
+                      <Line
+                        type="monotone"
+                        dataKey="latency"
+                        stroke="#3b82f6"
                         strokeWidth={2}
                         dot={false}
                       />
@@ -179,39 +180,39 @@ export default function Dashboard() {
         </Grid>
 
         {/* Traffic Chart */}
-        <Grid item xs={12}>
-          <Card>
+        <Grid item xs={12} md={8}>
+          <Card sx={{ height: '400px' }}>
             <CardContent>
               <Typography variant="subtitle1" color="text.secondary" gutterBottom>
                 流量趋势
               </Typography>
-              
-              <Box sx={{ height: 200 }}>
+
+              <Box sx={{ height: 300 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData}>
-                    <XAxis 
-                      dataKey="time" 
+                    <XAxis
+                      dataKey="time"
                       tick={{ fontSize: 12 }}
                       tickLine={false}
                     />
-                    <YAxis 
+                    <YAxis
                       tick={{ fontSize: 12 }}
                       tickLine={false}
                       tickFormatter={(v) => `${v.toFixed(0)}M`}
                     />
-                    <Area 
-                      type="monotone" 
-                      dataKey="download" 
+                    <Area
+                      type="monotone"
+                      dataKey="download"
                       stackId="1"
-                      stroke="#10b981" 
+                      stroke="#10b981"
                       fill="#10b981"
                       fillOpacity={0.3}
                     />
-                    <Area 
-                      type="monotone" 
-                      dataKey="upload" 
+                    <Area
+                      type="monotone"
+                      dataKey="upload"
                       stackId="1"
-                      stroke="#3b82f6" 
+                      stroke="#3b82f6"
                       fill="#3b82f6"
                       fillOpacity={0.3}
                     />
@@ -220,6 +221,11 @@ export default function Dashboard() {
               </Box>
             </CardContent>
           </Card>
+        </Grid>
+
+        {/* Real-time Logs */}
+        <Grid item xs={12} md={4}>
+          <LogPanel />
         </Grid>
 
         {/* Quick Actions */}
@@ -231,11 +237,11 @@ export default function Dashboard() {
                 size="large"
                 startIcon={<PowerIcon />}
                 color={systemProxyEnabled ? 'error' : 'primary'}
-                onClick={() => setSystemProxyEnabled(!systemProxyEnabled)}
+                onClick={() => toggleSystemProxy(!systemProxyEnabled)}
               >
                 {systemProxyEnabled ? '关闭系统代理' : '开启系统代理'}
               </Button>
-              
+
               <Button
                 variant="outlined"
                 size="large"
@@ -243,7 +249,7 @@ export default function Dashboard() {
               >
                 节点测速
               </Button>
-              
+
               <Button
                 variant="outlined"
                 size="large"

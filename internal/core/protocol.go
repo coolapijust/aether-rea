@@ -42,8 +42,8 @@ type Record struct {
 	ErrorMessage string
 }
 
-// buildMetadataRecord creates an encrypted metadata record.
-func buildMetadataRecord(host string, port uint16, maxPadding uint16, psk string, streamID uint64) ([]byte, error) {
+// BuildMetadataRecord creates an encrypted metadata record.
+func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string, streamID uint64) ([]byte, error) {
 	plaintext, err := buildMetadataPayload(host, port, maxPadding)
 	if err != nil {
 		return nil, err

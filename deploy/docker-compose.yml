@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # 1. 业务网关 (Caddy v2)
+  # 负责 H3 宣告、主动探测防御以及静态伪装分流
+  gateway:
+    image: caddy:2-alpine
+    container_name: aether-gateway
+    restart: always
+    ports:
+      - "443:443/tcp"
+      - "443:443/udp" # 必须映射 UDP 端口以支持 HTTP/3
+    environment:
+      - DOMAIN=your-domain.com # 请在此处替换您的真实域名
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - aether-net
+    depends_on:
+      - decoy-site
+      - aether-gateway
+
+  # 2. 伪装站点 (VitePress + Nginx)
+  # 作为默认回落，展示一个极其正经的开源技术文档站
+  decoy-site:
+    build:
+      context: ./decoy
+    container_name: decoy-site
+    restart: always
+    networks:
+      - aether-net
+
+  # 3. Aether 核心服务端 (Go)
+  # 负责真正的 WebTransport 业务处理
+  aether-gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: aether-gateway-backend
+    restart: always
+    environment:
+      - PSK=your_super_secret_token
+      - LISTEN_ADDR=:8080
+    networks:
+      - aether-net
+    # 提示：如果 VPS 开启了防火墙，请确保 UDP/443 在系统层面已放行
+
+networks:
+  aether-net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

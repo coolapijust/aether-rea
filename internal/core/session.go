@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -155,7 +157,29 @@ func (sm *sessionManager) dialSession(ctx context.Context) (*webtransport.Sessio
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	_, sess, err := sm.dialer.Dial(ctx, sm.config.URL, nil)
+	dialURL := sm.config.URL
+	
+	// Handle DialAddr override (e.g. for IP optimization)
+	if sm.config.DialAddr != "" {
+		host, port, err := net.SplitHostPort(sm.config.DialAddr)
+		if err != nil {
+			// If missing port, assume 443
+			if strings.Contains(err.Error(), "missing port") {
+				host = sm.config.DialAddr
+				port = "443"
+			} else {
+				return nil, err
+			}
+		}
+		
+		parsed, err := url.Parse(sm.config.URL)
+		if err == nil {
+			parsed.Host = net.JoinHostPort(host, port)
+			dialURL = parsed.String()
+		}
+	}
+
+	_, sess, err := sm.dialer.Dial(ctx, dialURL, nil)
 	if err != nil {
 		return nil, err
 	}

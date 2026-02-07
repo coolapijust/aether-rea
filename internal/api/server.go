@@ -73,6 +73,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/v1/control/start", s.handleStart)
 	mux.HandleFunc("/api/v1/control/stop", s.handleStop)
 	mux.HandleFunc("/api/v1/control/rotate", s.handleRotate)
+	mux.HandleFunc("/api/v1/control/proxy", s.handleProxy)
 	
 	// WebSocket endpoint for events
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
@@ -146,10 +147,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Config      *core.SessionConfig `json:"config"`
 		Uptime      int64            `json:"uptime_ms,omitempty"`
 		StreamCount int              `json:"active_streams"`
+		ProxyEnabled bool             `json:"proxy_enabled"`
+		RulesCount   int              `json:"rules_count"`
 	}{
 		State:       state,
 		Config:      config,
-		StreamCount: 0, // TODO: get from core
+		StreamCount: len(s.core.GetStreams()),
+		ProxyEnabled: s.core.IsSystemProxyEnabled(),
+		RulesCount:   len(s.core.GetRules()),
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -288,6 +293,33 @@ func (s *Server) handleRotate(w http.ResponseWriter, r *http.Request) {
 	
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "rotating"})
+}
+
+// handleProxy toggles the system proxy
+func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	
+	if err := s.core.SetSystemProxy(req.Enabled); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"enabled": req.Enabled,
+	})
 }
 
 // handleEvents handles WebSocket connections for event streaming

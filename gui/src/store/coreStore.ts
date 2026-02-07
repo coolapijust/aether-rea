@@ -3,11 +3,12 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { api } from '@/lib/api';
 import { EventStream } from '@/lib/websocket';
-import type { 
-  CoreState, 
-  AnyCoreEvent, 
-  StreamInfo, 
+import type {
+  CoreState,
+  AnyCoreEvent,
+  StreamInfo,
   CoreConfig,
+  AppLogEvent,
 } from '@/types/core';
 
 interface CoreStore {
@@ -15,7 +16,7 @@ interface CoreStore {
   connectionState: 'disconnected' | 'connecting' | 'connected';
   coreState: CoreState;
   lastError?: { code: string; message: string; fatal: boolean };
-  
+
   // Session
   currentSession?: {
     id: string;
@@ -25,20 +26,27 @@ interface CoreStore {
     uptime: number;
   };
   nextRotation?: number;
-  
+
   // Streams
   streams: Map<string, StreamInfo>;
   activeStreamCount: number;
-  
+
+  // Proxy
+  systemProxyEnabled: boolean;
+
+  // Logs
+  logs: AppLogEvent[];
+  maxLogs: number;
+
   // Events
   events: AnyCoreEvent[];
   maxEvents: number;
-  
+
   // Config
   currentConfig: CoreConfig;
   editingConfig: CoreConfig;
   hasUnsavedChanges: boolean;
-  
+
   // Metrics for charts
   metricsHistory: {
     timestamp: number;
@@ -47,11 +55,11 @@ interface CoreStore {
     activeStreams: number;
     latencyMs?: number;
   }[];
-  
+
   // Traffic stats
   totalUpload: number;
   totalDownload: number;
-  
+
   // API Actions
   connect: () => void;
   disconnect: () => void;
@@ -62,11 +70,13 @@ interface CoreStore {
   stopCore: () => Promise<void>;
   rotateSession: () => Promise<void>;
   closeStream: (streamId: string) => void;
-  
+  toggleSystemProxy: (enabled: boolean) => Promise<void>;
+
   // Event handling
   applyEvent: (event: AnyCoreEvent) => void;
   updateEditingConfig: (config: Partial<CoreConfig>) => void;
   clearEvents: () => void;
+  clearLogs: () => void;
 }
 
 const defaultConfig: CoreConfig = {
@@ -101,12 +111,15 @@ export const useCoreStore = create<CoreStore>()(
       metricsHistory: [],
       totalUpload: 0,
       totalDownload: 0,
+      systemProxyEnabled: false,
+      logs: [],
+      maxLogs: 500,
 
       connect: () => {
         if (eventStream) return;
-        
+
         set({ connectionState: 'connecting' });
-        
+
         eventStream = new EventStream(
           (event) => get().applyEvent(event),
           () => {
@@ -116,7 +129,7 @@ export const useCoreStore = create<CoreStore>()(
           },
           () => set({ connectionState: 'disconnected' })
         );
-        
+
         eventStream.connect();
       },
 
@@ -129,7 +142,11 @@ export const useCoreStore = create<CoreStore>()(
       fetchStatus: async () => {
         try {
           const status = await api.getStatus();
-          set({ coreState: status.state });
+          set({
+            coreState: status.state,
+            systemProxyEnabled: status.proxy_enabled,
+            activeStreamCount: status.active_streams,
+          });
         } catch (err) {
           console.error('Failed to fetch status:', err);
         }
@@ -138,7 +155,7 @@ export const useCoreStore = create<CoreStore>()(
       fetchConfig: async () => {
         try {
           const config = await api.getConfig();
-          set({ 
+          set({
             currentConfig: config,
             editingConfig: config,
             hasUnsavedChanges: false,
@@ -152,7 +169,7 @@ export const useCoreStore = create<CoreStore>()(
         const { editingConfig } = get();
         try {
           await api.updateConfig(editingConfig);
-          set({ 
+          set({
             currentConfig: editingConfig,
             hasUnsavedChanges: false,
           });
@@ -201,23 +218,33 @@ export const useCoreStore = create<CoreStore>()(
         // TODO: Call API to actually close stream
       },
 
+      toggleSystemProxy: async (enabled) => {
+        try {
+          await api.setSystemProxy(enabled);
+          set({ systemProxyEnabled: enabled });
+        } catch (err) {
+          console.error('Failed to toggle system proxy:', err);
+          throw err;
+        }
+      },
+
       applyEvent: (event) => {
         const state = get();
-        
+
         // Add to events
         const newEvents = [...state.events, event];
         if (newEvents.length > state.maxEvents) {
           newEvents.shift();
         }
-        
+
         set({ events: newEvents });
-        
+
         // Process event
         switch (event.type) {
           case 'core.stateChanged':
             set({ coreState: event.to });
             break;
-            
+
           case 'session.established':
             set({
               currentSession: {
@@ -229,13 +256,13 @@ export const useCoreStore = create<CoreStore>()(
               },
             });
             break;
-            
+
           case 'session.closed':
             if (state.currentSession?.id === event.sessionId) {
               set({ currentSession: undefined });
             }
             break;
-            
+
           case 'stream.opened': {
             const newStreams = new Map(state.streams);
             newStreams.set(event.streamId, {
@@ -247,13 +274,13 @@ export const useCoreStore = create<CoreStore>()(
               bytesSent: 0,
               bytesReceived: 0,
             });
-            set({ 
-              streams: newStreams, 
-              activeStreamCount: state.activeStreamCount + 1 
+            set({
+              streams: newStreams,
+              activeStreamCount: state.activeStreamCount + 1
             });
             break;
           }
-            
+
           case 'stream.closed': {
             const newStreams = new Map(state.streams);
             const stream = newStreams.get(event.streamId);
@@ -263,15 +290,15 @@ export const useCoreStore = create<CoreStore>()(
               stream.bytesReceived = event.bytesReceived;
               newStreams.set(event.streamId, stream);
             }
-            set({ 
-              streams: newStreams, 
+            set({
+              streams: newStreams,
               activeStreamCount: Math.max(0, state.activeStreamCount - 1),
               totalUpload: state.totalUpload + event.bytesSent,
               totalDownload: state.totalDownload + event.bytesReceived,
             });
             break;
           }
-            
+
           case 'core.error':
             set({
               lastError: {
@@ -281,7 +308,7 @@ export const useCoreStore = create<CoreStore>()(
               },
             });
             break;
-            
+
           case 'metrics.snapshot': {
             const newHistory = [...state.metricsHistory, {
               timestamp: event.timestamp,
@@ -293,12 +320,12 @@ export const useCoreStore = create<CoreStore>()(
             if (newHistory.length > 100) {
               newHistory.shift();
             }
-            set({ 
+            set({
               metricsHistory: newHistory,
               totalUpload: event.bytesSent,
               totalDownload: event.bytesReceived,
             });
-            
+
             if (state.currentSession) {
               set({
                 currentSession: {
@@ -309,10 +336,19 @@ export const useCoreStore = create<CoreStore>()(
             }
             break;
           }
-            
+
           case 'rotation.scheduled':
             set({ nextRotation: event.nextRotation });
             break;
+
+          case 'app.log': {
+            const newLogs = [...get().logs, event];
+            if (newLogs.length > get().maxLogs) {
+              newLogs.shift();
+            }
+            set({ logs: newLogs });
+            break;
+          }
         }
       },
 
@@ -322,6 +358,7 @@ export const useCoreStore = create<CoreStore>()(
       })),
 
       clearEvents: () => set({ events: [] }),
+      clearLogs: () => set({ logs: [] }),
     }))
   )
 );
