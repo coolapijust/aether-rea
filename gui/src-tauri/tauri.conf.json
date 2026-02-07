@@ -22,9 +22,6 @@
         "unmaximize": true,
         "unminimize": true,
         "startDragging": true
-      },
-      "systemTray": {
-        "all": true
       }
     },
     "bundle": {
