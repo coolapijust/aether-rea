@@ -8,12 +8,15 @@ import (
 
 // SessionConfig is JSON-serializable configuration for Core.
 type SessionConfig struct {
-	URL            string `json:"url"`                      // https://host/path
-	PSK            string `json:"psk"`                      // Pre-shared key
-	ListenAddr     string `json:"listenAddr"`               // SOCKS5 listen address
-	DialAddr       string `json:"dialAddr,omitempty"`       // Override dial address (optional)
-	RotateInterval int    `json:"rotateInterval,omitempty"` // Milliseconds, 0 = no auto-rotation
-	MaxPadding     int    `json:"maxPadding,omitempty"`     // 0-65535, default 0
+	URL            string         `json:"url"`                // https://host/path
+	PSK            string         `json:"psk"`                // Pre-shared key
+	ListenAddr     string         `json:"listenAddr"`         // SOCKS5 listen address
+	DialAddr       string         `json:"dialAddr,omitempty"` // Override dial address (optional)
+	MaxPadding     int            `json:"maxPadding,omitempty"` // 0-65535, default 0
+	Rotation       RotationConfig `json:"rotation,omitempty"`   // Session rotation policy
+	
+	// Deprecated: Use Rotation.Enabled = false instead
+	RotateInterval int `json:"rotateInterval,omitempty"` 
 }
 
 // TargetAddress represents a destination host:port.

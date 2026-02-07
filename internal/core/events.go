@@ -178,6 +178,56 @@ func NewMetricsSnapshotEvent(uptime int64, active, total int64, sent, recv uint6
 	}
 }
 
+// Event: rotation.scheduled
+// Fires when next rotation is scheduled (for countdown display).
+type RotationScheduledEvent struct {
+	baseEvent
+	NextRotation int64 `json:"nextRotation"` // Unix timestamp (milliseconds)
+	MinInterval  int64 `json:"minInterval"`  // milliseconds
+	MaxInterval  int64 `json:"maxInterval"`  // milliseconds
+}
+
+func NewRotationScheduledEvent(nextRotation time.Time, minInterval, maxInterval time.Duration) Event {
+	return RotationScheduledEvent{
+		baseEvent:    baseEvent{Type: "rotation.scheduled", Timestamp: time.Now().UnixMilli()},
+		NextRotation: nextRotation.UnixMilli(),
+		MinInterval:  minInterval.Milliseconds(),
+		MaxInterval:  maxInterval.Milliseconds(),
+	}
+}
+
+// Event: rotation.prewarm.started
+// Fires when pre-warming of new session begins.
+type RotationPreWarmStartedEvent struct {
+	baseEvent
+	NewSessionID string `json:"newSessionId"`
+}
+
+func NewRotationPreWarmStartedEvent(newSessionID string) Event {
+	return RotationPreWarmStartedEvent{
+		baseEvent:    baseEvent{Type: "rotation.prewarm.started", Timestamp: time.Now().UnixMilli()},
+		NewSessionID: newSessionID,
+	}
+}
+
+// Event: rotation.completed
+// Fires when rotation to new session is complete.
+type RotationCompletedEvent struct {
+	baseEvent
+	OldSessionID string `json:"oldSessionId"`
+	NewSessionID string `json:"newSessionId"`
+	DrainingTime int64  `json:"drainingTime"` // milliseconds, time before old session closes
+}
+
+func NewRotationCompletedEvent(oldID, newID string, drainingTime time.Duration) Event {
+	return RotationCompletedEvent{
+		baseEvent:    baseEvent{Type: "rotation.completed", Timestamp: time.Now().UnixMilli()},
+		OldSessionID: oldID,
+		NewSessionID: newID,
+		DrainingTime: drainingTime.Milliseconds(),
+	}
+}
+
 // Error codes from Aether-Realist Protocol V3 Section 7.2
 const (
 	ErrBadRecord      = "ERR_BAD_RECORD"
