@@ -130,6 +130,11 @@ func main() {
 </html>`))
 	})
 
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
 	log.Printf("Listening on %s", *listenAddr)
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
