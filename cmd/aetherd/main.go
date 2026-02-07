@@ -26,10 +26,20 @@ func main() {
 	// Create Core
 	c := core.New()
 
+	// Prepare config
+	config := core.SessionConfig{
+		ListenAddr: *listenAddr,
+	}
+
 	// Load config if specified
 	if *configFile != "" {
 		// TODO: Load from file
 		log.Printf("Loading config from %s", *configFile)
+	}
+
+	// Start Core with config
+	if err := c.Start(config); err != nil {
+		log.Fatalf("Failed to start core: %v", err)
 	}
 
 	// Start HTTP API server
