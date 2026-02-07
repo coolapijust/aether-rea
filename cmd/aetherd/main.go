@@ -26,7 +26,6 @@ func main() {
 		listenAddr = flag.String("listen", "127.0.0.1:1080", "SOCKS5 listen address")
 		httpAddr   = flag.String("http", "", "HTTP proxy listen address (e.g. 127.0.0.1:1081)")
 		apiAddr    = flag.String("api", "127.0.0.1:9880", "HTTP API listen address")
-		configFile = flag.String("config", "", "Config file path")
 		url        = flag.String("url", "", "WebTransport endpoint URL")
 		psk        = flag.String("psk", "", "Pre-shared key")
 	)
