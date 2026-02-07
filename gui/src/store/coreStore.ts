@@ -80,7 +80,7 @@ interface CoreStore {
 }
 
 const defaultConfig: CoreConfig = {
-  url: 'https://example.com/v1/api/sync',
+  url: '',
   psk: '',
   listenAddr: '127.0.0.1:1080',
   maxPadding: 128,
