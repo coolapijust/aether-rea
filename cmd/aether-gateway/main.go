@@ -42,9 +42,12 @@ func main() {
 		log.Fatal("PSK is required")
 	}
 
-	// Support $PORT environment variable for cloud platforms (e.g., Cloud Run, ClawCloud)
-	if os.Getenv("PORT") != "" {
-		*listenAddr = ":" + os.Getenv("PORT")
+	// Support $PORT or $LISTEN_ADDR environment variables
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		*listenAddr = ":" + envPort
+	}
+	if envAddr := os.Getenv("LISTEN_ADDR"); envAddr != "" {
+		*listenAddr = envAddr
 	}
 
 	// Try to load TLS certs, fallback to self-signed

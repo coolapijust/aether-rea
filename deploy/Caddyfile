@@ -1,8 +1,8 @@
 {
-	# 全局配置：启用 HTTP/3
+	# 全局配置：关闭 Caddy 自带的 H3 以释放 UDP/443 (由 Backend 接管)
 	servers {
 		protocol {
-			experimental_http3
+			allow_h3 false
 		}
 	}
 }
@@ -33,14 +33,11 @@
 		respond `{"code": 40101, "message": "Invalid Authentication Token"}` 401
 	}
 
-	# 3. Aether WebTransport 业务路由
-	# 逻辑：仅转发符合协议特征的流量，支持无限流式输出
+	# 3. Aether WebTransport 业务路由 (TCP 回落/探测)
+	# 逻辑：当用户通过 TCP 访问 /sync 时，返回 401，诱导探测者认为这是普通加密接口
 	handle /v1/api/sync {
-		reverse_proxy aether-gateway:8080 {
-			header_up Host {host}
-			header_up X-Real-IP {remote_host}
-			flush_interval -1
-		}
+		header Content-Type application/json
+		respond `{"code": 40102, "message": "Authentication Required"}` 401
 	}
 
 	# 4. 默认回落 (Decoy Site)

@@ -8,8 +8,8 @@ services:
     container_name: aether-gateway
     restart: always
     ports:
-      - "443:443/tcp"
-      - "443:443/udp" # 必须映射 UDP 端口以支持 HTTP/3
+      - "80:80/tcp"
+      - "443:443/tcp" # Caddy 仅负责 TCP (HTTPS + Decoy)
     environment:
       - DOMAIN=your-domain.com # 请在此处替换您的真实域名
     volumes:
@@ -40,12 +40,14 @@ services:
       dockerfile: Dockerfile
     container_name: aether-gateway-backend
     restart: always
+    ports:
+      - "443:8080/udp" # Aether 直接接管 UDP 443 (HTTP/3 WebTransport)
     environment:
       - PSK=your_super_secret_token
       - LISTEN_ADDR=:8080
     networks:
       - aether-net
-    # 提示：如果 VPS 开启了防火墙，请确保 UDP/443 在系统层面已放行
+    # 核心设计：Caddy (TCP/443) + Aether (UDP/443) 完美共存且互不干扰
 
 networks:
   aether-net:
