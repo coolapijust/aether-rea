@@ -30,6 +30,7 @@ jobs:
 
       - name: Build Core
         run: |
+          rm -f go.sum
           go mod tidy
           go build -ldflags="-s -w" -o gui/src-tauri/bin/aetherd.exe ./cmd/aetherd
 
