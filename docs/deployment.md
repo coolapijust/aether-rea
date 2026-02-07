@@ -37,7 +37,60 @@ docker run -d \
 
 ---
 
-## 2. Cloudflare Worker 配置 (Legacy)
+## 2. 反向代理与 TLS 自动化 (Caddy)
+
+如果您希望拥有自动化的公网证书（由 Let's Encrypt 提供），推荐使用 Caddy。
+
+### 方案 A：Caddy 获取证书 + Gateway 直接挂载 (推荐)
+
+让 Caddy 负责证书更新，Gateway 直接读取 Caddy 生成的文件。
+
+**Caddyfile:**
+```caddy
+your-domain.com {
+    # 仅用于获取证书，不执行转发
+    tls your-email@example.com
+}
+```
+
+**Docker Compose 示例:**
+```yaml
+services:
+  gateway:
+    image: ghcr.io/coolapijust/aether-rea:latest
+    ports:
+      - "443:4433/udp"
+    volumes:
+      - caddy_data:/certs:ro
+    command: -cert /certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/your-domain.com/your-domain.com.crt -key /certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/your-domain.com/your-domain.com.key -psk "your-psk"
+
+volumes:
+  caddy_data:
+    external: true
+```
+
+### 方案 B：Caddy 反向代理 (HTTP/3 转发)
+
+> [!WARNING]
+> WebTransport 转发对反向代理的要求较高，请确保 Caddy 版本 >= 2.7。
+
+**Caddyfile:**
+```caddy
+your-domain.com {
+    reverse_proxy https://gateway:4433 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        transport http {
+            versions h3
+            tls_insecure_skip_verify # 允许 Gateway 使用自签名证书
+        }
+    }
+}
+```
+
+---
+
+## 3. Cloudflare Worker 配置 (Legacy)
 
 ### Wrangler 配置
 
