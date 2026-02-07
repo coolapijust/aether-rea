@@ -12,6 +12,7 @@ import (
 
 	"aether-rea/internal/api"
 	"aether-rea/internal/core"
+	"aether-rea/internal/systemproxy"
 	"aether-rea/internal/util"
 )
 
