@@ -83,24 +83,6 @@ type MetricsData struct {
 	LastLatencyMs   *int64  `json:"last_latency_ms,omitempty"`
 }
 
-// Rule represents a routing rule
-type Rule struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Priority int               `json:"priority"`
-	Enabled  bool              `json:"enabled"`
-	Matches  []MatchCondition `json:"matches"`
-	Action   string            `json:"action"`
-	Target   string            `json:"target,omitempty"`
-}
-
-// MatchCondition represents a rule match condition
-type MatchCondition struct {
-	Type  string `json:"type"`
-	Value string `json:"value"`
-	Not   bool   `json:"not,omitempty"`
-}
-
 // CoreEventEvent is a generic event
 type CoreEventEvent struct {
 	baseEvent

@@ -30,8 +30,18 @@ type StreamHandle struct {
 	ID string `json:"id"`
 }
 
-// CoreState represents the current FSM state (string for JSON).
-type CoreState = string
+// StreamInfo represents information about an active stream
+type StreamInfo struct {
+	ID            string `json:"id"`
+	TargetHost    string `json:"targetHost"`
+	TargetPort    int    `json:"targetPort"`
+	OpenedAt      int64  `json:"openedAt"`
+	State         string `json:"state"`
+	BytesSent     uint64 `json:"bytesSent"`
+	BytesReceived uint64 `json:"bytesReceived"`
+}
+
+// CoreState is defined in state.go - use CoreState type from state.go
 
 // EventHandler receives Core events.
 type EventHandler func(event Event)
