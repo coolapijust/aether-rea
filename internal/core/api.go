@@ -370,7 +370,7 @@ func (c *Core) initialize() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.metrics = &Metrics{}
+	c.metrics = NewMetrics() // Use constructor!
 	c.metricsCollector = NewMetricsCollector(c.metrics, 1*time.Second, c.emit)
 	c.metricsCollector.Start()
 

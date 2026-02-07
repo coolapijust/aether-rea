@@ -92,7 +92,11 @@ func (m *Metrics) RecordLatency(ms int64) {
 
 // LastLatency returns last measured latency (nil if none).
 func (m *Metrics) LastLatency() *int64 {
-	return m.lastLatency.Load().(*int64)
+	val := m.lastLatency.Load()
+	if val == nil {
+		return nil
+	}
+	return val.(*int64)
 }
 
 // Snapshot returns current metrics as an event.
