@@ -208,7 +208,10 @@ func (sm *sessionManager) dialSession(ctx context.Context) (*webtransport.Sessio
 	return sess, nil
 }
 
-// monitorSession watches for session closure.
+func (sm *sessionManager) monitorSession() {
+	if sm.session == nil {
+		return
+	}
 	// Wait for context cancellation or session close in background
 	go func() {
 		<-sm.ctx.Done()
