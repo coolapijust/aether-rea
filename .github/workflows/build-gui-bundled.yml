@@ -1,0 +1,78 @@
+name: build-gui-with-embedded-core
+
+on:
+  push:
+    paths:
+      - "cmd/aetherd/**"
+      - "cmd/aether-client/**"
+      - "gui/**"
+      - "internal/**"
+      - "go.mod"
+      - ".github/workflows/build-gui-bundled.yml"
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.21"
+  NODE_VERSION: "20"
+
+jobs:
+  build-gui-bundled:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            goos: windows
+            goarch: amd64
+            ext: .exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      # Setup Go for building Core
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Build Core (aetherd)
+      - name: Build Core
+        run: |
+          rm -f go.sum
+          go mod tidy
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o gui/src-tauri/bin/aetherd${{ matrix.ext }} ./cmd/aetherd
+
+      # Setup Node
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: gui/package-lock.json
+
+      # Install dependencies
+      - name: Install dependencies
+        working-directory: gui
+        run: npm ci
+
+      # Install Rust
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Build GUI (with embedded Core)
+      - name: Build GUI
+        working-directory: gui
+        run: npm run tauri:build
+
+      # Upload artifact
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-gui-bundled-windows
+          path: |
+            gui/src-tauri/target/release/bundle/msi/*.msi
+            gui/src-tauri/target/release/bundle/nsis/*.exe

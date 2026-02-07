@@ -3,8 +3,10 @@ package api
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -78,7 +80,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
 	
 	// Static files (for embedded GUI)
-	mux.Handle("/", http.FileServer(http.Dir("./static")))
+	// Serve embedded GUI files from embedded filesystem
+	mux.Handle("/", http.FileServer(http.FS(s.staticFS)))
 	
 	s.server = &http.Server{
 		Addr:    s.addr,
