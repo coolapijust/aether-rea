@@ -68,13 +68,31 @@ export default {
 };
 
 async function handleSession(session, env, streamCounter) {
-  for await (const stream of session.incomingBidirectionalStreams) {
-    const streamId = streamCounter.next().value;
-    handleBidirectionalStream(stream, env, streamId).catch(() => {
-      stream.readable.cancel();
-      stream.writable.abort();
-    });
+  // 监听 session 关闭
+  const sessionClosed = session.closed
+    .then(() => ({ closed: true, error: null }))
+    .catch((err) => ({ closed: true, error: err }));
+
+  try {
+    for await (const stream of session.incomingBidirectionalStreams) {
+      const streamId = streamCounter.next().value;
+      handleBidirectionalStream(stream, env, streamId).catch((err) => {
+        console.error(`Stream ${streamId} error:`, err);
+        try {
+          stream.readable.cancel();
+          stream.writable.abort();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      });
+    }
+  } catch (err) {
+    console.error("Session incoming streams error:", err);
   }
+
+  // 等待 session 完全关闭
+  await sessionClosed;
+  console.log("Session closed");
 }
 
 function createStreamCounter() {

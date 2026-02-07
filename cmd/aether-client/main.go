@@ -219,7 +219,7 @@ func (m *sessionManager) getSession(ctx context.Context) (*webtransport.Session,
 }
 
 func (m *sessionManager) dialSession(ctx context.Context) (*webtransport.Session, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	_, sess, err := m.dialer.Dial(ctx, m.url.String(), nil)
