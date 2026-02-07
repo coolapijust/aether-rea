@@ -46,7 +46,7 @@ jobs:
         run: npm ci
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build GUI
         working-directory: gui
