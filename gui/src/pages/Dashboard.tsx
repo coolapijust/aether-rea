@@ -1,12 +1,9 @@
 import {
   Box,
-  Card,
-  CardContent,
   Typography,
   Button,
   Grid,
   Paper,
-  Divider,
 } from '@mui/material';
 import {
   PowerSettingsNew as PowerIcon,
