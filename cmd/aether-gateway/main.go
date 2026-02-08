@@ -230,8 +230,12 @@ func main() {
 	}
 	log.Printf("HTTP/1.1 (TCP+TLS) server listening on %s", tcpListener.Addr().String())
 
-	// Enable TLS on TCP listener using the same config
-	tlsListener := tls.NewListener(tcpListener, tlsConfig)
+	// Clone TLS config for TCP, setting correct ALPN for HTTP/1.1 and HTTP/2
+	tcpTLSConfig := tlsConfig.Clone()
+	tcpTLSConfig.NextProtos = []string{"h2", "http/1.1"}
+
+	// Enable TLS on TCP listener using the tcp specific config
+	tlsListener := tls.NewListener(tcpListener, tcpTLSConfig)
 
 	if err := httpServer.Serve(tlsListener); err != nil {
 		log.Fatalf("TCP server failed: %v", err)
