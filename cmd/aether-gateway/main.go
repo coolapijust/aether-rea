@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
@@ -25,8 +26,30 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
+	"github.com/quic-go/quic-go/logging"
+	"github.com/quic-go/quic-go/qlog"
 	"github.com/quic-go/webtransport-go"
 )
+
+// BufferedWriteCloser buffers writes and flushes on close
+type BufferedWriteCloser struct {
+	*bufio.Writer
+	closer io.Closer
+}
+
+func NewBufferedWriteCloser(writer *bufio.Writer, closer io.Closer) *BufferedWriteCloser {
+	return &BufferedWriteCloser{
+		Writer: writer,
+		closer: closer,
+	}
+}
+
+func (b *BufferedWriteCloser) Close() error {
+	if err := b.Writer.Flush(); err != nil {
+		return err
+	}
+	return b.closer.Close()
+}
 
 var (
 	listenAddr = flag.String("listen", ":8080", "Listen address")
@@ -94,8 +117,24 @@ func main() {
 		NextProtos:   []string{http3.NextProtoH3},
 	}
 
+	var tracer func(context.Context, quic.LoggingPerspective, quic.ConnectionID) *logging.ConnectionTracer
+	if os.Getenv("QLOG") == "1" {
+		log.Println("Config: QLOG tracing enabled")
+		tracer = func(ctx context.Context, p quic.LoggingPerspective, connID quic.ConnectionID) *logging.ConnectionTracer {
+			filename := fmt.Sprintf("server_%x.qlog", connID)
+			f, err := os.Create(filename)
+			if err != nil {
+				log.Printf("Failed to create qlog file: %v", err)
+				return nil
+			}
+			log.Printf("Writing qlog to %s", filename)
+			return qlog.NewConnectionTracer(NewBufferedWriteCloser(bufio.NewWriter(f), f), p, connID)
+		}
+	}
+
 	quicConfig := &quic.Config{
 		EnableDatagrams: true,
+		Tracer:          tracer,
 	}
 
 	server := webtransport.Server{
