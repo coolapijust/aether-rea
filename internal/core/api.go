@@ -303,8 +303,8 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 	// Save to disk
 	if c.configManager != nil {
 		if err := c.configManager.Save(&config); err != nil {
-			fmt.Printf("Failed to save config: %v\n", err)
-			// Don't fail the request, just log
+			log.Printf("[ERROR] Failed to save config: %v", err)
+			return fmt.Errorf("failed to save config: %w", err)
 		}
 	}
 
