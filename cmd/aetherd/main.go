@@ -8,8 +8,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
