@@ -592,11 +592,13 @@ func (c *Core) performRotation() error {
 func (c *Core) openStreamInternal(target TargetAddress, options map[string]interface{}) (StreamHandle, error) {
 	session, streamID, err := c.sessionMgr.getSession(c.ctx)
 	if err != nil {
+		log.Printf("[DEBUG] Open stream to %s:%d failed: %v", target.Host, target.Port, err)
 		return StreamHandle{}, err
 	}
 
 	stream, err := session.OpenStreamSync(c.ctx)
 	if err != nil {
+		log.Printf("[DEBUG] Open stream sync to %s:%d failed: %v", target.Host, target.Port, err)
 		return StreamHandle{}, err
 	}
 

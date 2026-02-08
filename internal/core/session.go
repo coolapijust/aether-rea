@@ -82,6 +82,11 @@ func (sm *sessionManager) initialize() error {
 		QUICConfig: quicConfig,
 	}
 
+	if sm.config.AllowInsecure {
+		log.Printf("[WARNING] TLS InsecureSkipVerify is ENABLED. This is intended for debugging or private gateways ONLY.")
+	}
+	log.Printf("[DEBUG] WebTransport dialer initialized for %s", parsed.Hostname())
+
 	return nil
 }
 
@@ -205,6 +210,7 @@ func (sm *sessionManager) dialSession(ctx context.Context) (*webtransport.Sessio
 	}
 	
 	// Handle DialAddr override (e.g. for IP optimization)
+	finalAddr := u.Host
 	if sm.config.DialAddr != "" {
 		host, port, err := net.SplitHostPort(sm.config.DialAddr)
 		if err != nil {
@@ -217,10 +223,13 @@ func (sm *sessionManager) dialSession(ctx context.Context) (*webtransport.Sessio
 			}
 		}
 		u.Host = net.JoinHostPort(host, port)
+		finalAddr = u.Host
 	}
 
+	log.Printf("[DEBUG] Dialing WebTransport: %s (Target Host: %s)", u.String(), finalAddr)
 	_, sess, err := sm.dialer.Dial(ctx, u.String(), nil)
 	if err != nil {
+		log.Printf("[DEBUG] Dial failed: %v", err)
 		return nil, fmt.Errorf("dial to %s failed: %w", u.Host, err)
 	}
 
@@ -237,6 +246,7 @@ func (sm *sessionManager) monitorSession() {
 		sm.mu.Lock()
 		if sm.session != nil {
 			reason := "closed"
+			log.Printf("[DEBUG] Session %s closed (reason: context done)", sm.sessionID)
 			sm.onEvent(NewSessionClosedEvent(sm.sessionID, &reason, nil))
 			sm.session = nil
 		}
