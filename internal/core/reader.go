@@ -86,3 +86,49 @@ func (r *RecordReader) ReadNextRecord() (*Record, error) {
 	}
 	return result, nil
 }
+
+// RecordReadWriter provides a unified io.ReadWriteCloser interface that handles
+// all Record wrapping/unwrapping automatically.
+type RecordReadWriter struct {
+	*RecordReader
+	writer     io.Writer
+	closer     io.Closer
+	maxPadding uint16
+}
+
+// NewRecordReadWriter creates a new RecordReadWriter.
+func NewRecordReadWriter(rw io.ReadWriteCloser, maxPadding uint16) *RecordReadWriter {
+	return &RecordReadWriter{
+		RecordReader: NewRecordReader(rw),
+		writer:       rw,
+		closer:       rw,
+		maxPadding:   maxPadding,
+	}
+}
+
+// Write wraps data into core.Records before writing to the underlying stream.
+func (rw *RecordReadWriter) Write(p []byte) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	// For simplicity, we wrap the entire p in one Record.
+	// Max QUIC stream packet size typically handles 1400 bytes,
+	// but WebTransport handles larger chunks by splitting.
+	record, err := BuildDataRecord(p, rw.maxPadding)
+	if err != nil {
+		return 0, err
+	}
+
+	_, err = rw.writer.Write(record)
+	if err != nil {
+		return 0, err
+	}
+
+	return len(p), nil
+}
+
+// Close closes the underlying stream.
+func (rw *RecordReadWriter) Close() error {
+	return rw.closer.Close()
+}

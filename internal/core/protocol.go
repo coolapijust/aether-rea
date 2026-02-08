@@ -63,7 +63,9 @@ func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string
 
 	header := make([]byte, RecordHeaderLength)
 	header[0] = TypeMetadata
-	binary.BigEndian.PutUint32(header[4:8], uint32(len(plaintext)))
+	// Use final ciphertext length for AAD consistency
+	ciphertextLen := len(plaintext) + 16
+	binary.BigEndian.PutUint32(header[4:8], uint32(ciphertextLen))
 	binary.BigEndian.PutUint32(header[8:12], 0)
 	copy(header[12:24], iv)
 
@@ -77,7 +79,6 @@ func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string
 	}
 
 	ciphertext := gcm.Seal(nil, iv, plaintext, header)
-	binary.BigEndian.PutUint32(header[4:8], uint32(len(ciphertext)))
 
 	return buildRecord(header, ciphertext, nil), nil
 }

@@ -622,6 +622,9 @@ func (c *Core) openStreamInternal(target TargetAddress, options map[string]inter
 		return StreamHandle{}, err
 	}
 
+	// Wrap the stream in a RecordReadWriter to handle data-phase encapsulation
+	wrappedStream := NewRecordReadWriter(stream, maxPadding)
+
 	id := fmt.Sprintf("str-%d-%d", streamID, time.Now().UnixNano())
 	handle := StreamHandle{ID: id}
 
@@ -635,7 +638,7 @@ func (c *Core) openStreamInternal(target TargetAddress, options map[string]inter
 
 	c.mu.Lock()
 	c.streams[id] = info
-	c.activeStreams[id] = stream
+	c.activeStreams[id] = wrappedStream
 	c.mu.Unlock()
 
 	if c.metrics != nil {
