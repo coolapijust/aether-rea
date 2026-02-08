@@ -22,19 +22,33 @@ import {
   Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { useCoreStore } from '@/store/coreStore';
+import { translations } from '@/lib/i18n';
 import type { AnyCoreEvent } from '@/types/core';
 import { formatBytes } from '@/utils/format';
 
-const eventTypeLabels: Record<string, string> = {
-  'core.stateChanged': '状态变更',
-  'session.established': '会话建立',
-  'session.rotating': '会话轮换',
-  'session.closed': '会话关闭',
-  'stream.opened': '连接建立',
-  'stream.closed': '连接关闭',
-  'stream.error': '连接错误',
-  'core.error': '核心错误',
-  'rotation.scheduled': '轮换计划',
+const eventTypeLabels: Record<string, Record<string, string>> = {
+  en: {
+    'core.stateChanged': 'State Change',
+    'session.established': 'Session Est.',
+    'session.rotating': 'Rotating',
+    'session.closed': 'Session Closed',
+    'stream.opened': 'Stream Opened',
+    'stream.closed': 'Stream Closed',
+    'stream.error': 'Stream Error',
+    'core.error': 'Core Error',
+    'rotation.scheduled': 'Scheduled',
+  },
+  zh: {
+    'core.stateChanged': '状态变更',
+    'session.established': '会话建立',
+    'session.rotating': '会话轮换',
+    'session.closed': '会话关闭',
+    'stream.opened': '连接建立',
+    'stream.closed': '连接关闭',
+    'stream.error': '连接错误',
+    'core.error': '核心错误',
+    'rotation.scheduled': '轮换计划',
+  }
 };
 
 const getEventColor = (type: string) => {
@@ -44,14 +58,15 @@ const getEventColor = (type: string) => {
   return 'info';
 };
 
-const formatEventMessage = (event: AnyCoreEvent): string => {
+const formatEventMessage = (event: AnyCoreEvent, lang: 'en' | 'zh'): string => {
+  const isZh = lang === 'zh';
   switch (event.type) {
     case 'core.stateChanged':
       return `${event.from} → ${event.to}`;
     case 'session.established':
-      return `Session ${event.sessionId.slice(-4)} 已建立`;
+      return isZh ? `会话 ${event.sessionId.slice(-4)} 已建立` : `Session ${event.sessionId.slice(-4)} established`;
     case 'session.closed':
-      return `Session ${event.sessionId.slice(-4)} 已关闭 (${event.reason || 'unknown'})`;
+      return isZh ? `会话 ${event.sessionId.slice(-4)} 已关闭` : `Session ${event.sessionId.slice(-4)} closed`;
     case 'stream.opened':
       return `${event.target.host}:${event.target.port}`;
     case 'stream.closed':
@@ -67,7 +82,8 @@ export default function Logs() {
   const [activeTab, setActiveTab] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [filter, setFilter] = useState<string>('all');
-  const { events, logs, clearEvents, clearLogs } = useCoreStore();
+  const { events, logs, clearEvents, clearLogs, language } = useCoreStore();
+  const t = translations[language];
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto scroll for System Logs (Tab 0)
@@ -94,22 +110,22 @@ export default function Logs() {
     <Box sx={{ p: 3, height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          实时日志与事件
+          {t.logs.title}
         </Typography>
 
         <Box sx={{ display: 'flex', gap: 1 }}>
           {activeTab === 1 && (
             <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>筛选</InputLabel>
+              <InputLabel>{language === 'zh' ? '筛选' : 'Filter'}</InputLabel>
               <Select
                 value={filter}
-                label="筛选"
+                label={language === 'zh' ? '筛选' : 'Filter'}
                 onChange={(e) => setFilter(e.target.value)}
               >
-                <MenuItem value="all">全部事件</MenuItem>
-                <MenuItem value="session">会话变更</MenuItem>
-                <MenuItem value="stream">连接详情</MenuItem>
-                <MenuItem value="error">错误日志</MenuItem>
+                <MenuItem value="all">{language === 'zh' ? '全部事件' : 'All Events'}</MenuItem>
+                <MenuItem value="session">{language === 'zh' ? '会话变更' : 'Sessions'}</MenuItem>
+                <MenuItem value="stream">{language === 'zh' ? '连接详情' : 'Streams'}</MenuItem>
+                <MenuItem value="error">{language === 'zh' ? '错误日志' : 'Errors'}</MenuItem>
               </Select>
             </FormControl>
           )}
@@ -126,8 +142,8 @@ export default function Logs() {
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
         <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}>
-          <Tab label="实时数据追踪 (系统)" />
-          <Tab label="事件记录" />
+          <Tab label={t.logs.tab_system} />
+          <Tab label={t.logs.tab_events} />
         </Tabs>
       </Box>
 
@@ -148,7 +164,7 @@ export default function Logs() {
           >
             {logs.length === 0 ? (
               <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
-                <Typography variant="body2">等待系统日志中...</Typography>
+                <Typography variant="body2">{t.logs.placeholder}</Typography>
               </Box>
             ) : (
               logs.map((log, i) => (
@@ -183,16 +199,16 @@ export default function Logs() {
                     }}
                   >
                     <Typography variant="caption" sx={{ minWidth: 70, fontFamily: 'monospace', color: 'text.secondary' }}>
-                      {new Date(event.timestamp).toLocaleTimeString('zh-CN')}
+                      {new Date(event.timestamp).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en-US')}
                     </Typography>
                     <Chip
-                      label={eventTypeLabels[event.type] || event.type}
+                      label={eventTypeLabels[language][event.type] || event.type}
                       color={getEventColor(event.type) as any}
                       size="small"
                       sx={{ minWidth: 100 }}
                     />
                     <Typography variant="body2" sx={{ flex: 1, fontWeight: 500 }}>
-                      {formatEventMessage(event)}
+                      {formatEventMessage(event, language)}
                     </Typography>
                   </ListItem>
                 ))}

@@ -599,15 +599,9 @@ func (c *Core) performRotation() error {
 
 // openStreamInternal creates a stream (protocol internal).
 func (c *Core) openStreamInternal(target TargetAddress, options map[string]interface{}) (StreamHandle, error) {
-	session, streamID, err := c.sessionMgr.getSession(c.ctx)
+	stream, streamID, err := c.sessionMgr.OpenStream(c.ctx)
 	if err != nil {
 		log.Printf("[DEBUG] Open stream to %s:%d failed: %v", target.Host, target.Port, err)
-		return StreamHandle{}, err
-	}
-
-	stream, err := session.OpenStreamSync(c.ctx)
-	if err != nil {
-		log.Printf("[DEBUG] Open stream sync to %s:%d failed: %+v (err type: %T)", target.Host, target.Port, err, err)
 		return StreamHandle{}, err
 	}
 

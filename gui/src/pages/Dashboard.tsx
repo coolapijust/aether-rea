@@ -4,6 +4,7 @@ import {
   Button,
   Grid,
   Paper,
+  IconButton,
 } from '@mui/material';
 import {
   PowerSettingsNew as PowerIcon,
@@ -12,6 +13,7 @@ import {
   Dns as ServerIcon,
   Devices as ClientIcon,
   Language as WebIcon,
+  Language as LanguageIcon,
 } from '@mui/icons-material';
 import {
   ResponsiveContainer,
@@ -19,6 +21,7 @@ import {
   AreaChart,
 } from 'recharts';
 import { useCoreStore } from '@/store/coreStore';
+import { translations } from '@/lib/i18n';
 import { formatDuration, formatBytes } from '@/utils/format';
 
 // Mini Component: Sparkline Chart with Gradient
@@ -76,7 +79,11 @@ export default function Dashboard() {
     toggleSystemProxy,
     lastError,
     currentConfig,
+    language,
+    setLanguage,
   } = useCoreStore();
+
+  const t = translations[language];
 
   const isConnected = coreState === 'Active';
 
@@ -114,29 +121,47 @@ export default function Dashboard() {
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: -1.5, color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
             <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: isConnected ? 'success.main' : 'error.main', boxShadow: isConnected ? '0 0 8px #10b981' : 'none' }} />
-            AETHER CONTROL
+            {t.dashboard.title}
           </Typography>
           <Typography variant="caption" sx={{ opacity: 0.4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 2 }}>
-            Precision Link Analysis Hub
+            {t.dashboard.subtitle}
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          size="medium"
-          startIcon={<PowerIcon />}
-          color={systemProxyEnabled ? 'error' : 'primary'}
-          onClick={() => toggleSystemProxy(!systemProxyEnabled)}
-          sx={{
-            borderRadius: 2,
-            px: 3,
-            textTransform: 'none',
-            fontWeight: 700,
-            boxShadow: systemProxyEnabled ? '0 4px 14px rgba(239, 68, 68, 0.4)' : '0 4px 14px rgba(59, 130, 246, 0.4)',
-            transition: 'all 0.2s'
-          }}
-        >
-          {systemProxyEnabled ? 'Disconnect Proxy' : 'Enable System Proxy'}
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <IconButton
+            onClick={() => setLanguage(language === 'en' ? 'zh' : 'en')}
+            sx={{
+              bgcolor: 'rgba(255,255,255,0.02)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '12px',
+              px: 2,
+              gap: 1,
+              '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
+            }}
+          >
+            <LanguageIcon sx={{ fontSize: 18 }} />
+            <Typography variant="button" sx={{ fontSize: '0.7rem', fontWeight: 600 }}>
+              {t.common.lang_switch}
+            </Typography>
+          </IconButton>
+          <Button
+            variant="contained"
+            size="medium"
+            startIcon={<PowerIcon />}
+            color={systemProxyEnabled ? 'error' : 'primary'}
+            onClick={() => toggleSystemProxy(!systemProxyEnabled)}
+            sx={{
+              borderRadius: 2,
+              px: 3,
+              textTransform: 'none',
+              fontWeight: 700,
+              boxShadow: systemProxyEnabled ? '0 4px 14px rgba(239, 68, 68, 0.4)' : '0 4px 14px rgba(59, 130, 246, 0.4)',
+              transition: 'all 0.2s'
+            }}
+          >
+            {systemProxyEnabled ? (language === 'zh' ? '断开代理' : 'Disconnect Proxy') : (language === 'zh' ? '开启系统代理' : 'Enable System Proxy')}
+          </Button>
+        </Box>
       </Box>
 
       {/* Main Content Area */}
@@ -147,13 +172,13 @@ export default function Dashboard() {
 
           {/* Node Topology Widget */}
           <Paper sx={{ p: 3, display: 'flex', flexDirection: 'column', bgcolor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 4, position: 'relative' }}>
-            <Typography variant="overline" sx={{ opacity: 0.5, fontWeight: 800, mb: 3, display: 'block' }}>Network Topology</Typography>
+            <Typography variant="overline" sx={{ opacity: 0.5, fontWeight: 800, mb: 3, display: 'block' }}>{t.dashboard.topology}</Typography>
             <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', position: 'relative' }}>
               <Box sx={{ position: 'absolute', top: '40%', left: '20%', right: '20%', height: 1, background: 'linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.3), transparent)', zIndex: 0 }} />
 
-              <TopologyNode icon={ClientIcon} label="CORE" active={true} status="127.0.0.1" />
-              <TopologyNode icon={ServerIcon} label="GATEWAY" active={isConnected} status={isConnected ? 'TRUSTED' : 'OFFLINE'} />
-              <TopologyNode icon={WebIcon} label="TARGET" active={isConnected && activeStreamCount > 0} status={`${activeStreamCount} ACTIVE`} />
+              <TopologyNode icon={ClientIcon} label={t.dashboard.node_core} active={true} status="127.0.0.1" />
+              <TopologyNode icon={ServerIcon} label={t.dashboard.node_gateway} active={isConnected} status={isConnected ? t.dashboard.status_trusted : t.dashboard.status_offline} />
+              <TopologyNode icon={WebIcon} label={t.dashboard.node_target} active={isConnected && activeStreamCount > 0} status={`${activeStreamCount} ACTIVE`} />
             </Box>
 
             {lastError && (
@@ -167,23 +192,23 @@ export default function Dashboard() {
 
           {/* Metadata Grid */}
           <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 4, flex: 1 }}>
-            <Typography variant="overline" sx={{ opacity: 0.5, fontWeight: 800, mb: 2, display: 'block' }}>Session Intelligence</Typography>
+            <Typography variant="overline" sx={{ opacity: 0.5, fontWeight: 800, mb: 2, display: 'block' }}>{t.dashboard.metadata}</Typography>
             <Grid container spacing={2}>
               <Grid item xs={6}>
-                <Typography variant="caption" sx={{ opacity: 0.3, fontWeight: 700, display: 'block' }}>UPLINK PROTOCOL</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.3, fontWeight: 700, display: 'block' }}>{t.dashboard.proto}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>WebTransport H3</Typography>
               </Grid>
               <Grid item xs={6}>
-                <Typography variant="caption" sx={{ opacity: 0.3, fontWeight: 700, display: 'block' }}>UPTIME</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.3, fontWeight: 700, display: 'block' }}>{t.dashboard.uptime}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{currentSession ? formatDuration(currentSession.uptime) : '00:00:00'}</Typography>
               </Grid>
               <Grid item xs={6}>
-                <Typography variant="caption" sx={{ opacity: 0.3, fontWeight: 700, display: 'block' }}>LOCAL PORT</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.3, fontWeight: 700, display: 'block' }}>{t.dashboard.local_port}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>{currentConfig.listen_addr?.split(':')[1] || '1080'}</Typography>
               </Grid>
               <Grid item xs={6}>
-                <Typography variant="caption" sx={{ opacity: 0.3, fontWeight: 700, display: 'block' }}>BYPASS CN</Typography>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: currentConfig.bypass_cn ? 'success.main' : 'inherit' }}>{currentConfig.bypass_cn ? 'ENABLED' : 'DISABLED'}</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.3, fontWeight: 700, display: 'block' }}>{t.dashboard.bypass_cn}</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600, color: currentConfig.bypass_cn ? 'success.main' : 'inherit' }}>{currentConfig.bypass_cn ? t.dashboard.enabled : t.dashboard.disabled}</Typography>
               </Grid>
             </Grid>
           </Paper>
@@ -198,7 +223,7 @@ export default function Dashboard() {
               <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', borderRadius: 4, border: '1px solid rgba(255,255,255,0.05)' }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Box>
-                    <Typography variant="overline" color="success.main" sx={{ fontWeight: 800 }}>Downlink Flow</Typography>
+                    <Typography variant="overline" color="success.main" sx={{ fontWeight: 800 }}>{t.dashboard.downlink}</Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, letterSpacing: -2 }}>
                       {currentDown.toFixed(2)} <Typography component="span" variant="h6" sx={{ opacity: 0.3, fontWeight: 700 }}>MB/S</Typography>
                     </Typography>
@@ -209,7 +234,7 @@ export default function Dashboard() {
                 </Box>
                 <MiniChart data={chartData} color="#10b981" dataKey="download" />
                 <Box sx={{ mt: 'auto', display: 'flex', justifyContent: 'space-between', pt: 2, borderTop: '1px solid rgba(255,255,255,0.03)' }}>
-                  <Typography variant="caption" sx={{ opacity: 0.4 }}>TOTAL RECEIVED</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.4 }}>{t.dashboard.total_received}</Typography>
                   <Typography variant="caption" sx={{ fontWeight: 700 }}>{formatBytes(totalDownload)}</Typography>
                 </Box>
               </Paper>
@@ -220,7 +245,7 @@ export default function Dashboard() {
               <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', borderRadius: 4, border: '1px solid rgba(255,255,255,0.05)' }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Box>
-                    <Typography variant="overline" color="primary.main" sx={{ fontWeight: 800 }}>Uplink Flow</Typography>
+                    <Typography variant="overline" color="primary.main" sx={{ fontWeight: 800 }}>{t.dashboard.uplink}</Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, letterSpacing: -2 }}>
                       {currentUp.toFixed(2)} <Typography component="span" variant="h6" sx={{ opacity: 0.3, fontWeight: 700 }}>MB/S</Typography>
                     </Typography>
@@ -231,7 +256,7 @@ export default function Dashboard() {
                 </Box>
                 <MiniChart data={chartData} color="#3b82f6" dataKey="upload" />
                 <Box sx={{ mt: 'auto', display: 'flex', justifyContent: 'space-between', pt: 2, borderTop: '1px solid rgba(255,255,255,0.03)' }}>
-                  <Typography variant="caption" sx={{ opacity: 0.4 }}>TOTAL SENT</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.4 }}>{t.dashboard.total_sent}</Typography>
                   <Typography variant="caption" sx={{ fontWeight: 700 }}>{formatBytes(totalUpload)}</Typography>
                 </Box>
               </Paper>
@@ -242,15 +267,15 @@ export default function Dashboard() {
               <Paper sx={{ p: 3, flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 4, border: '1px solid rgba(255,255,255,0.05)' }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
                   <Box>
-                    <Typography variant="overline" color="warning.main" sx={{ fontWeight: 800 }}>Latency Performance</Typography>
+                    <Typography variant="overline" color="warning.main" sx={{ fontWeight: 800 }}>{t.dashboard.latency}</Typography>
                     <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 4 }}>
                       <Typography variant="h2" sx={{ fontWeight: 900, letterSpacing: -4, lineHeight: 1 }}>
                         {lastMetrics?.latencyMs || '-'} <Typography component="span" variant="h5" sx={{ opacity: 0.3, fontWeight: 800, letterSpacing: 0 }}>MS</Typography>
                       </Typography>
                       <Box sx={{ pb: 0.5 }}>
-                        <Typography variant="caption" sx={{ display: 'block', opacity: 0.4, fontWeight: 700, mb: -0.5 }}>STABILITY</Typography>
+                        <Typography variant="caption" sx={{ display: 'block', opacity: 0.4, fontWeight: 700, mb: -0.5 }}>{t.dashboard.stability}</Typography>
                         <Typography variant="body1" sx={{ fontWeight: 800, color: jitter > 50 ? 'error.main' : 'warning.main' }}>
-                          ±{jitter}ms <Typography component="span" variant="caption">JITTER</Typography>
+                          ±{jitter}ms <Typography component="span" variant="caption">{t.dashboard.jitter}</Typography>
                         </Typography>
                       </Box>
                     </Box>

@@ -72,6 +72,10 @@ interface CoreStore {
   closeStream: (streamId: string) => void;
   toggleSystemProxy: (enabled: boolean) => Promise<void>;
 
+  // i18n
+  language: 'zh' | 'en';
+  setLanguage: (lang: 'zh' | 'en') => void;
+
   // Event handling
   applyEvent: (event: AnyCoreEvent) => void;
   updateEditingConfig: (config: Partial<CoreConfig>) => void;
@@ -115,6 +119,8 @@ export const useCoreStore = create<CoreStore>()(
       systemProxyEnabled: false,
       logs: [],
       maxLogs: 500,
+      language: 'en',
+      setLanguage: (lang) => set({ language: lang }),
 
       connect: () => {
         if (eventStream) return;

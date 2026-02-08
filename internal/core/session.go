@@ -177,8 +177,8 @@ func (sm *sessionManager) close(reason string) error {
 	return nil
 }
 
-// getSession returns current session and increments counter.
-func (sm *sessionManager) getSession(ctx context.Context) (*webtransport.Session, uint64, error) {
+// OpenStream opens a new stream and returns it with a synchronized counter.
+func (sm *sessionManager) OpenStream(ctx context.Context) (webtransport.Stream, uint64, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -186,8 +186,13 @@ func (sm *sessionManager) getSession(ctx context.Context) (*webtransport.Session
 		return nil, 0, fmt.Errorf("no active session")
 	}
 
+	stream, err := sm.session.OpenStreamSync(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	sm.counter++
-	return sm.session, sm.counter, nil
+	return stream, sm.counter, nil
 }
 
 // dialSession creates a new WebTransport session.
@@ -308,7 +313,7 @@ func (sm *sessionManager) pingOnce() {
 	ctx, cancel := context.WithTimeout(sm.ctx, 5*time.Second)
 	defer cancel()
 	
-	stream, err := sess.OpenStreamSync(ctx)
+	stream, _, err := sm.OpenStream(ctx)
 	if err != nil {
 		return
 	}
