@@ -240,7 +240,7 @@ func (c *Core) setLastError(err error) {
 	c.mu.Unlock()
 	// Also emit error event
 	if err != nil {
-		c.emit(NewErrorEvent(err.Error(), "core", false))
+		c.emit(NewCoreErrorEvent("CORE_ERROR", err.Error(), false))
 	}
 }
 
