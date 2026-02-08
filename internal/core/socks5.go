@@ -171,25 +171,7 @@ func (c *streamConn) Read(p []byte) (int, error) {
 		c.reader = NewRecordReader(stream)
 	}
 	
-	for {
-		record, err := c.reader.ReadNextRecord()
-		if err != nil {
-			return 0, err
-		}
-		
-		if record.Type == TypeError {
-			return 0, fmt.Errorf("server error: %s", record.ErrorMessage)
-		}
-		
-		if record.Type == TypeData {
-			n := copy(p, record.Payload)
-			if c.core.metrics != nil {
-				c.core.metrics.RecordBytesReceived(uint64(n))
-			}
-			return n, nil
-		}
-		// Ignore other types for now
-	}
+	return c.reader.Read(p)
 }
 
 func (c *streamConn) Write(p []byte) (int, error) {
