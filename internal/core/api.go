@@ -21,10 +21,10 @@ type SessionConfig struct {
 	HttpProxyAddr  string         `json:"http_proxy_addr"`      // HTTP proxy listen address
 	DialAddr       string         `json:"dial_addr,omitempty"` // Override dial address (optional)
 	MaxPadding     int            `json:"max_padding,omitempty"` // 0-65535, default 0
-	AllowInsecure  bool           `json:"allow_insecure,omitempty"` // Skip TLS verification
+	AllowInsecure  bool           `json:"allow_insecure"`        // Skip TLS verification
 	Rotation       RotationConfig `json:"rotation,omitempty"`   // Session rotation policy
-	BypassCN       bool           `json:"bypass_cn,omitempty"`   // Bypass China sites
-	BlockAds       bool           `json:"block_ads,omitempty"`   // Block advertisement
+	BypassCN       bool           `json:"bypass_cn"`             // Bypass China sites
+	BlockAds       bool           `json:"block_ads"`             // Block advertisement
 	
 	Rules []*Rule `json:"rules,omitempty"` // Custom routing rules
 }
