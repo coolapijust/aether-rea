@@ -47,8 +47,8 @@ export default function Rules() {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={editingConfig.bypassCN}
-                    onChange={(e) => updateEditingConfig({ bypassCN: e.target.checked })}
+                    checked={editingConfig.bypass_cn}
+                    onChange={(e) => updateEditingConfig({ bypass_cn: e.target.checked })}
                   />
                 }
                 label="国内网站直连"
@@ -57,8 +57,8 @@ export default function Rules() {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={editingConfig.blockAds}
-                    onChange={(e) => updateEditingConfig({ blockAds: e.target.checked })}
+                    checked={editingConfig.block_ads}
+                    onChange={(e) => updateEditingConfig({ block_ads: e.target.checked })}
                   />
                 }
                 label="拦截广告"
@@ -98,12 +98,12 @@ export default function Rules() {
                 <TextField
                   label="最短间隔 (分钟)"
                   type="number"
-                  value={editingConfig.rotation.minIntervalMs / 60 / 1000}
+                  value={editingConfig.rotation.min_interval_ms / 60 / 1000}
                   onChange={(e) =>
                     updateEditingConfig({
                       rotation: {
                         ...editingConfig.rotation,
-                        minIntervalMs: parseInt(e.target.value) * 60 * 1000
+                        min_interval_ms: parseInt(e.target.value) * 60 * 1000
                       }
                     })
                   }
@@ -112,12 +112,12 @@ export default function Rules() {
                 <TextField
                   label="最长间隔 (分钟)"
                   type="number"
-                  value={editingConfig.rotation.maxIntervalMs / 60 / 1000}
+                  value={editingConfig.rotation.max_interval_ms / 60 / 1000}
                   onChange={(e) =>
                     updateEditingConfig({
                       rotation: {
                         ...editingConfig.rotation,
-                        maxIntervalMs: parseInt(e.target.value) * 60 * 1000
+                        max_interval_ms: parseInt(e.target.value) * 60 * 1000
                       }
                     })
                   }
@@ -128,12 +128,12 @@ export default function Rules() {
               <TextField
                 label="预热时间 (秒)"
                 type="number"
-                value={editingConfig.rotation.preWarmMs / 1000}
+                value={editingConfig.rotation.pre_warm_ms / 1000}
                 onChange={(e) =>
                   updateEditingConfig({
                     rotation: {
                       ...editingConfig.rotation,
-                      preWarmMs: parseInt(e.target.value) * 1000
+                      pre_warm_ms: parseInt(e.target.value) * 1000
                     }
                   })
                 }
@@ -162,30 +162,30 @@ export default function Rules() {
 
               <TextField
                 label="SOCKS5 监听地址"
-                value={editingConfig.listenAddr}
-                onChange={(e) => updateEditingConfig({ listenAddr: e.target.value })}
+                value={editingConfig.listen_addr}
+                onChange={(e) => updateEditingConfig({ listen_addr: e.target.value })}
                 fullWidth
               />
 
               <TextField
                 label="HTTP 监听地址"
-                value={editingConfig.httpProxyAddr}
-                onChange={(e) => updateEditingConfig({ httpProxyAddr: e.target.value })}
+                value={editingConfig.http_proxy_addr}
+                onChange={(e) => updateEditingConfig({ http_proxy_addr: e.target.value })}
                 fullWidth
               />
 
               <TextField
                 label="最大填充 (bytes)"
-                value={editingConfig.maxPadding}
-                onChange={(e) => updateEditingConfig({ maxPadding: parseInt(e.target.value) })}
+                value={editingConfig.max_padding}
+                onChange={(e) => updateEditingConfig({ max_padding: parseInt(e.target.value) })}
                 sx={{ maxWidth: 200 }}
               />
 
               <FormControlLabel
                 control={
                   <Switch
-                    checked={editingConfig.allowInsecure || false}
-                    onChange={(e) => updateEditingConfig({ allowInsecure: e.target.checked })}
+                    checked={editingConfig.allow_insecure || false}
+                    onChange={(e) => updateEditingConfig({ allow_insecure: e.target.checked })}
                   />
                 }
                 label="允许不安全连接 (跳过证书验证)"
