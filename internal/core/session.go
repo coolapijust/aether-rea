@@ -189,31 +189,39 @@ func (sm *sessionManager) dialSession(ctx context.Context) (*webtransport.Sessio
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	dialURL := sm.config.URL
+	// Parse and normalize base URL
+	u, err := url.Parse(sm.config.URL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid config url: %w", err)
+	}
+
+	// Ensure port is present in the URL host (required by quic-go/webtransport)
+	if u.Port() == "" {
+		defaultPort := "443"
+		if u.Scheme == "http" {
+			defaultPort = "80"
+		}
+		u.Host = net.JoinHostPort(u.Hostname(), defaultPort)
+	}
 	
 	// Handle DialAddr override (e.g. for IP optimization)
 	if sm.config.DialAddr != "" {
 		host, port, err := net.SplitHostPort(sm.config.DialAddr)
 		if err != nil {
-			// If missing port, assume 443
-			if strings.Contains(err.Error(), "missing port") {
+			// Handle missing port error (common for raw IPs/domains)
+			if strings.Contains(err.Error(), "missing port") || strings.Contains(err.Error(), "too many colons") {
 				host = sm.config.DialAddr
-				port = "443"
+				port = "443" 
 			} else {
-				return nil, err
+				return nil, fmt.Errorf("invalid dial addr: %w", err)
 			}
 		}
-		
-		parsed, err := url.Parse(sm.config.URL)
-		if err == nil {
-			parsed.Host = net.JoinHostPort(host, port)
-			dialURL = parsed.String()
-		}
+		u.Host = net.JoinHostPort(host, port)
 	}
 
-	_, sess, err := sm.dialer.Dial(ctx, dialURL, nil)
+	_, sess, err := sm.dialer.Dial(ctx, u.String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial to %s failed: %w", u.Host, err)
 	}
 
 	return sess, nil
