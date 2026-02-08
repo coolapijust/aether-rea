@@ -158,20 +158,15 @@ type streamConn struct {
 	core   *Core
 	local  net.Addr
 	remote net.Addr
-	reader *RecordReader
 	closed bool
 }
 
 func (c *streamConn) Read(p []byte) (int, error) {
-	if c.reader == nil {
-		stream, ok := c.core.GetUnderlyingStream(c.handle)
-		if !ok {
-			return 0, fmt.Errorf("stream not found")
-		}
-		c.reader = NewRecordReader(stream)
+	stream, ok := c.core.GetUnderlyingStream(c.handle)
+	if !ok {
+		return 0, fmt.Errorf("stream not found")
 	}
-	
-	return c.reader.Read(p)
+	return stream.Read(p)
 }
 
 func (c *streamConn) Write(p []byte) (int, error) {
@@ -180,30 +175,16 @@ func (c *streamConn) Write(p []byte) (int, error) {
 		return 0, fmt.Errorf("stream not found")
 	}
 
-	maxPadding := uint16(0)
-	if c.core.config != nil {
-		maxPadding = uint16(c.core.config.MaxPadding)
-	}
-
-	record, err := BuildDataRecord(p, maxPadding)
-	if err != nil {
-		return 0, err
-	}
-	
-	n, err := stream.Write(record)
+	n, err := stream.Write(p)
 	if err != nil {
 		return 0, err
 	}
 	
 	if c.core.metrics != nil {
-		c.core.metrics.RecordBytesSent(uint64(len(p)))
+		c.core.metrics.RecordBytesSent(uint64(n))
 	}
 
-	// Correctly return the number of bytes from the original payload
-	if n > 0 {
-		return len(p), nil
-	}
-	return 0, io.EOF
+	return n, nil
 }
 
 func (c *streamConn) Close() error {
