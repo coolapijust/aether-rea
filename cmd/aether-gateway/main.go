@@ -163,23 +163,18 @@ func main() {
 
 	http.HandleFunc(*secretPath, func(w http.ResponseWriter, r *http.Request) {
 		// Log every attempt to the secret path
-		log.Printf("[DEBUG] connection attempt from %s to %s", r.RemoteAddr, r.URL.Path)
+		log.Printf("[DEBUG] connection attempt from %s to %s (Method: %s)", r.RemoteAddr, r.URL.Path, r.Method)
 
-		// Decoy: If not a WebTransport upgrade request, return a standard API 401
-		if r.Header.Get("Upgrade") != "webtransport" {
-			log.Printf("[DEBUG] Invalid upgrade header: %s", r.Header.Get("Upgrade"))
+		session, err := server.Upgrade(w, r)
+		if err != nil {
+			log.Printf("[DEBUG] WebTransport upgrade failed (likely non-WT request): %v", err)
+			// Decoy: Return a standard API 401 for unauthorized/non-protocol probes
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"code": 40101, "message": "Invalid authentication token", "status": "error"}`))
 			return
 		}
 
-		session, err := server.Upgrade(w, r)
-		if err != nil {
-			log.Printf("[ERROR] Upgrade failed: %v", err)
-			w.WriteHeader(500)
-			return
-		}
 		log.Printf("[INFO] WebTransport session upgraded for %s", r.RemoteAddr)
 		handleSession(session, *psk)
 	})

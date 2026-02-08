@@ -203,11 +203,34 @@ func (sm *sessionManager) dialSession(ctx context.Context) (*webtransport.Sessio
 
 	// Ensure port is present in the URL host (required by quic-go/webtransport)
 	if u.Port() == "" {
-		defaultPort := "443"
-		if u.Scheme == "http" {
-			defaultPort = "80"
+		// Robustness: Check if port was accidentally appended to the path
+		// e.g., https://example.com/v1/api/sync:8080
+		if lastColon := strings.LastIndex(u.Path, ":"); lastColon != -1 {
+			possiblePort := u.Path[lastColon+1:]
+			// Check if it's a numeric port
+			isPort := true
+			for _, c := range possiblePort {
+				if c < '0' || c > '9' {
+					isPort = false
+					break
+				}
+			}
+			if isPort && possiblePort != "" {
+				newPort := possiblePort
+				u.Path = u.Path[:lastColon]
+				u.Host = net.JoinHostPort(u.Hostname(), newPort)
+				log.Printf("[WARNING] Misplaced port detected in URL path. Auto-corrected to %s (Path: %s)", u.Host, u.Path)
+			}
 		}
-		u.Host = net.JoinHostPort(u.Hostname(), defaultPort)
+
+		// If still no port, use default
+		if u.Port() == "" {
+			defaultPort := "443"
+			if u.Scheme == "http" {
+				defaultPort = "80"
+			}
+			u.Host = net.JoinHostPort(u.Hostname(), defaultPort)
+		}
 	}
 	
 	// Handle DialAddr override (e.g. for IP optimization)

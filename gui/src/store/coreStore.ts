@@ -237,13 +237,14 @@ export const useCoreStore = create<CoreStore>()(
       applyEvent: (event) => {
         const state = get();
 
-        // Add to events
-        const newEvents = [...state.events, event];
-        if (newEvents.length > state.maxEvents) {
-          newEvents.shift();
+        // Add to events (filter out high-frequency noise like metrics)
+        if (event.type !== 'metrics.snapshot') {
+          const newEvents = [...state.events, event];
+          if (newEvents.length > state.maxEvents) {
+            newEvents.shift();
+          }
+          set({ events: newEvents });
         }
-
-        set({ events: newEvents });
 
         // Process event
         switch (event.type) {
