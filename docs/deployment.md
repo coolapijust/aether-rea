@@ -1,12 +1,12 @@
 # 生产部署指南
 
-本指南详细说明了 Aether-Realist Gateway 的生产级部署方案，重点关注高可用性、安全防御与自动化 TLS 管理。
+本文档详细说明了 Aether-Realist V5 版本的生产级部署方案，重点关注高可用性、安全防御与自动化 TLS 管理。
 
 ---
 
 ## 1. 核心镜像部署 (Docker)
 
-Aether-Realist 提供了高性能的 Docker 镜像，内置 HTTP/3 WebTransport 支持与内存优化机制。
+Aether-Realist 提供了高性能的 Docker 镜像，内置 HTTP/3 WebTransport 支持与内存优化机制。V5 版本引入了更强的抗重放机制与 Session 自动轮换。
 
 ### 生产推荐：Docker Compose 编排
 
@@ -39,7 +39,20 @@ services:
 
 ---
 
-## 2. 自动化 TLS 证书管理 (Caddy)
+## 2. 安全与性能加固 (V5 特性)
+
+### 2.1 抗重放与 0-RTT
+V5 协议默认开启 **0-RTT** 支持。为了确保安全性，服务端实现了严格的 **单调计数器（Monotonic Counter）** 校验。
+- **运维建议**：确保服务器系统时间同步（使用 NTP），虽然 V5 主要依赖计数器防止重放，但 30s 的时间窗口校验依然作为第一道防线。
+
+### 2.2 自动 Rekey 机制
+V5 引入了密钥生命周期管理。当单个 WebTransport 会话写入记录数达到 **2^32** 次时，连接将自动断开。
+- **客户端行为**：客户端会自动感知并建立新会话，过程对用户透明。
+- **部署影响**：无须手动干预，仅需确保网关具备处理并发重连的能力。
+
+---
+
+## 3. 自动化 TLS 证书管理 (Caddy)
 
 为了确保传输链路的极致安全，建议使用 Caddy 作为证书管理后端。
 
@@ -56,10 +69,8 @@ your-domain.com {
 ```
 
 ---
-
----
  
- ## 3. 性能调优 (Kernel Tuning)
+ ## 4. 性能调优 (Kernel Tuning)
  
  为了在高延迟长距离链路中跑满带宽（BDP 适配），务必对 Linux 内核参数进行优化。
  
@@ -83,7 +94,7 @@ your-domain.com {
  
  ---
  
- ## 4. 云原生与边缘平台部署 (PaaS)
+ ## 5. 云原生与边缘平台部署 (PaaS)
 
 `aether-gateway` 已针对云原生环境进行了高度适配，支持在 Fly.io、Cloudflare Container 等容器平台上运行。
 
@@ -99,7 +110,7 @@ your-domain.com {
 
 ---
 
-## 4. 其它环境说明
+## 6. 其它环境说明
 
 项目依然保留了在 Cloudflare Workers 等边缘脚本环境运行的能力（源码参考 `src/worker.js`）。
 

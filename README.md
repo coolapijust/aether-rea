@@ -1,24 +1,24 @@
 # Aether-Realist
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-V3.2.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-V5.0.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go">
   <img src="https://img.shields.io/badge/WebTransport-HTTP%2F3-orange.svg" alt="WebTransport">
 </p>
 
-Aether-Realist 是一套基于 **WebTransport (HTTP/3)** 协议的高性能、无状态、生产级边缘中转系统。它采用创新的 **“零同步”(Zero-Sync)** 加密架构，彻底消除了高并发下的握手失败与解密报错，提供极致安全且稳定的隐蔽加密链路。
+Aether-Realist 是一套基于 **WebTransport (HTTP/3)** 协议的高性能、无状态、生产级边缘中转系统。它采用创新的 **“零同步”(Zero-Sync) V5** 加密架构，通过 SessionID + Counter 机制彻底消除了高并发下的 nonce 复用风险，提供极致安全且稳定的隐蔽加密链路。
 
 ---
 
 ## 🚀 核心优势
 
 ### 🛡️ 极致安全与隐蔽
-*   **零同步 (Zero-Sync) 架构**：通过 IV 盐值派生技术，实现加密密钥与序列号的彻底脱钩。无论网络延迟或乱序，双端均能即时计算出完全一致的密钥，彻底根治解密失败问题。
+*   **零同步 (Zero-Sync) V5 架构**：引入 **SessionID (4B) + 单调计数器 (8B)** 复合 Nonce 机制，实现加密密钥与序列号的彻底脱钩。无论网络延迟或乱序，双端均能即时计算出完全一致的密钥，并提供确定性的抗重放（Anti-Replay）保证。
 *   **自愈式会话 (Self-Healing)**：内置“心跳暂停感知”与“透明重连”机制。即使在长连接因网络或运营商原因断开后，系统毫秒级内自动恢复隧道，用户完全无感。
 *   **流量混淆 (Traffic Obfuscation)**：在常规 TLS 1.3 基础上，增加 **2KB-16KB 随机化分块** 策略。彻底打破应用层数据大小与网络包大小的关联，有效规避基于包长度的 DPI 识别。
-*   **元数据加密 (AES-GCM)**：所有流建立信息均经过 `AES-128-GCM` 加密，确保即便握手过程也被完全掩盖。
-*   **会话动态轮换 (Rotation)**：支持基于时间或流量的自动连接轮换，彻底消除长连接带来的统计学指纹特征。
+*   **元数据加密 (AES-GCM)**：所有流建立信息（Metadata）均经过 `AES-128-GCM` 强加密，**强制 16 字节认证标签**，确保即便握手过程也被完全掩盖。
+*   **会话动态轮换 (Rotation)**：支持基于时间或计数器（2^32 Rekey 阈值）的自动连接轮换，彻底消除长连接带来的统计学指纹特征。
 
 ### ⚡ 卓越性能
 *   **WebTransport 原生驱动**：利用 HTTP/3 的 QUIC 多路复用特性，彻底解决传统代理的队头阻塞（Head-of-Line Blocking）问题。

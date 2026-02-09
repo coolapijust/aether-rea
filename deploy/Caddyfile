@@ -1,4 +1,5 @@
 {
+	# Aether-Realist Caddy Config (Protocol V5 Optimized)
 	# 全局配置：关闭 Caddy 自带的 H3 以释放 UDP/443 (由 Backend 接管)
 	servers {
 		protocol {

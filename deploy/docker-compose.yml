@@ -1,4 +1,5 @@
 version: '3.8'
+# Aether-Realist Deployment Template (Protocol V5 Optimized)
 
 services:
   # 1. 业务网关 (Caddy v2)
