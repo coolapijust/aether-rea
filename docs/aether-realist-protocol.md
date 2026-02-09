@@ -113,7 +113,8 @@ Metadata Record 的 Payload 必须使用 `AES-128-GCM` 加密。
 - 应使用流式写入确保背压生效（`readable.pipeTo(writable)` 或等价实现）。
 - **MTU 与分片 (Fragmentation)**：
     - 本协议完全构建于 **QUIC Stream** 之上，不依赖 QUIC Datagram。
-    - **应用层分片**：Data Record 的 payload 大小（2KB-16KB）仅用于流量混淆，**与底层网络 MTU 无关**。QUIC 协议栈会自动负责将大 Record 切分为适合路径 MTU（PMTU）的 UDP 数据包并在接收端重组。
+    - **应用层分片**：Data Record 的 payload 大小（2KB-16KB）仅用于流量混淆。**应用层无需自行分片**，QUIC 协议栈会自动根据 PMTU 进行包化并在接收端可靠重组。
+    - **注意**：虽然应用层逻辑独立于 MTU，但 **PMTU 仍会影响传输效率与丢包重传行为**。
     - **禁止**：实现者不得假设 "One Record = One UDP Packet"。
 - **流量混淆 (Traffic Chunking)**：
     - 发送端应将大数据流拆分为 **2KB - 16KB** 的随机大小片段。
