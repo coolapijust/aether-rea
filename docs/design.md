@@ -1,6 +1,6 @@
 # Aether-Realist 设计文档 (架构、安全与性能)
 
-本文档深入介绍 Aether-Realist V3 版本的核心设计哲学、系统架构以及在安全与性能方面的优化实践。
+本文档深入介绍 Aether-Realist V4 版本的核心设计哲学、系统架构以及在安全与性能方面的优化实践。
 
 ---
 
@@ -11,64 +11,48 @@ Aether-Realist 采用 **Core-Daemon-GUI** 分离的设计架构，确保了核�
 ### 1.1 系统组件
 - **Aether Core (internal/core)**: 协议的核心实现，负责 WebTransport 会话管理、分段混淆、流式背压控制以及规则匹配。
 - **Aether Daemon (aetherd)**: 基于 Core 开发的后台进程，提供 SOCKS5 代理接口和 WebSocket 管理接口。
-- **Tauri GUI (gui/)**: 基于 React + TypeScript 的现代化界面，通过 WebSocket 异步订阅 Core 的所有事件（日志、指标、状态变化）。
-
-### 1.2 事件驱动通信 (Event-Driven)
-GUI 与守护进程之间不采用轮询，而是通过全双工的 WebSocket 进行通信：
-- **实时指标**: 每秒推送流量快照，前端绘制平滑曲线。
-- **异步日志**: 通过劫持 Go 标准日志流，实现服务端行为在客户端的实时可视化。
-- **状态流**: 核心引擎的 FSM（有限状态机）变化实时同步，确保 UI 状态严格反映后端真实连接情况。
+- **Tauri GUI (gui/)**: 基于 React + TypeScript 的现代化界面。
 
 ---
 
 ## 2. 安全机制 (Security)
 
-安全是 Aether-Realist 的生命线。我们从协议层到部署层提供了多维度的加固。
+安全是 Aether-Realist 的生命线。V4 版本在 V3 基础上进一步强化了协议鲁棒性。
 
 ### 2.1 主动探测防御 (Active Probe Defense)
-在生产部署中，利用 Caddy 的强大匹配能力实现“主动拒绝”：
-- **指纹匹配**: 只有携带特定协议头（如 `Upgrade: webtransport`）的请求才会被转发。
-- **陷阱响应**: 非法探测（如浏览器直接访问 API 路径）将收到诱导性的 401 JSON 错误，模拟一个不存在的私有服务，增加攻击者的测向难度。
+在生产部署中，利用 Caddy/OpenResty 的匹配能力实现“主动拒绝”：
+- **指纹匹配**: 只有携带特定协议特征（如 `Upgrade: webtransport`）的请求才会被转发。
+- **陷阱响应**: 非法探测将收到诱导性的 401 JSON 错误，增加攻击者的测向难度。
 
 ### 2.2 深度伪装 (Decoy System)
 通过 Caddy 的回落机制：
-- **默认站点**: 任何不满足 Aether 协议特征的流量都会被路由到一个极其“正经”的 **Decoy Site**（通常是一个伪装的技术文档站）。
-- **静态资源隔离**: 伪装站运行在独立的 Nginx 容器中，与核心业务完全隔离。
+- **默认站点**: 任何不满足 Aether 协议特征的流量都会被路由到一个极其“正经”的 **Decoy Site**。
 
-### 2.3 协议层安全 (零同步架构 - Zero-Sync)
+### 2.3 协议层安全 (零同步架构 V4)
 - **元数据加密**: 采用 `AES-128-GCM` 对目标地址（Metadata）进行强加密。
-- **零同步 (Zero-Sync) 密钥派生**: 每个流的加密密钥通过 HKDF 从 PSK 和 Record 头部自带的 **IV (随机初始向量)** 共同派生。
-    - **设计优势**: 加密密钥与流 ID 彻底脱钩。由于 IV 就在数据包头部且每个包唯一，双端无需任何序号同步即可计算出完全一致的密钥。
-- **极简 Record 头部 (24 Bytes)**:
-    - `Type` (1 byte) | `Reserved` (3 bytes) | `PayloadLen` (4 bytes) | `PaddingLen` (4 bytes) | `IV` (12 bytes).
-- **隐式特征消除**: 协议头在 TLS 内部传输，且字段尽可能随机化或对齐到 4 字节，不携带任何明显的协议明文指纹。
-- **流量混淆 (Traffic Obfuscation)**: 在应用层引入 **2KB-16KB 随机化分块 (Randomized Chunking)**。
-    - **原理**: Core 会主动将大的用户写入（如 1MB）拆分为一系列随机大小的数据包。
-    - **对抗 DPI**: 这使得流量在尺寸特征上呈现完全随机分布，既不像 TCP 流的 MSS 分包，也不像 TLS 握手包，极大增加了基于统计学的识别难度。
-- **定期轮换 (Session Rotation)**: 客户端根据时间或流量特征定期重建 WebTransport 连接，防止长连接引起的流量指纹积累。
+- **零同步 (Zero-Sync) 密钥派生**: 密钥通过 HKDF 从 PSK 和 Record 头部自带的 **IV** 共同派生，不依赖序号同步。
+- **协议头加固 (30 Bytes)**:
+    - V4 头部引入了 `Version` 和 `Timestamp` 字段，并全部纳入 AEAD 的 **AAD (附加认证数据)**。
+    - **设计优势**: 攻击者无法在不破坏加密验证的情况下篡改时间戳或版本号。
+- **抗重放攻击 (Anti-Replay)**:
+    - **时间戳校验**: 服务端强制 Record 时间戳与本地时间偏差在 ±30s 内。
+    - **IV 去重缓存 (ReplayCache)**: 内置高效的 IV 追踪器，拒绝任何已处理过的随机向量，彻底终结了 QUIC 0-RTT 的重放风险。
+- **隐式特征消除**: 协议头在 TLS 内部传输，且字段尽可能随机化或对齐。
+- **静默丢弃 (Silent Drop)**: 针对探测行为，服务端直接关闭流，不产生合规的错误响应，使特征完全消失。
+- **流量混淆 (Traffic Obfuscation)**: 在应用层引入 **2KB-16KB 随机化分块**。
 
 ---
 
 ## 3. 性能优化 (Performance)
 
 ### 3.1 HTTP/3 (QUIC) 优势
-- **0-RTT 建连**: 极速恢复连接。
+- **0-RTT 建连**: V4 配合抗重放机制，**正式开启 0-RTT**，实现真正的高性能握手恢复。
 - **无队头阻塞**: 单个流丢包不影响其他并发连接。
-- **连接迁移**: 在蜂窝网络与 WiFi 切换时保持 SOCKS5 连接不中断。
-- **自愈能力 (Self-Healing)**: Core 内置心跳监测与透明重连机制。当 Session 因空闲超时被服务端关闭时，客户端会在毫秒级内自动重建隧道并重放请求，实现“永远在线”的用户体验。
+- **连接迁移**: 在移动端场景保持 SOCKS5 连接不中断。
+- **自愈能力 (Self-Healing)**: Core 内置心跳监测与透明重连机制。
 
-### 3.2 吞吐量极致优化 (Throughput Tuning)
-针对跨境高延迟链路 (High BDP Links)，我们实施了激进的参数调优：
-- **超大流控窗口**: `MaxConnectionReceiveWindow` 设为 **48MB**，`MaxStreamReceiveWindow` 设为 **32MB**。确保在 200ms+ RTT 下依然能跑满千兆带宽。
-- **加速爬升 (Fast Ramp-up)**: 初始窗口 (Initial Window) 提升至 **4MB**，消除传统 TCP 慢启动带来的等待感。
-- **零损耗 I/O**:
-    - **环形缓冲**: 引入 `bufio` (1MB) 包装底层读取，减少 90% 的系统调用 (Syscall)。
-    - **大块传输**: 内部管道缓冲区从 32KB 提升至 512KB，显著降低 CPU 上下文切换开销。
-
-### 3.2 零延迟系统代理 (Windows)
-在 Windows 平台上，我们直接调用 `WinInet.dll` 的原生 API：
-- **InternetSetOption**: 修改注册表后立即通过系统调用刷新 OID 缓存，实现在开启代理的瞬间，所有浏览器无需重启即可立即生效。
-
-### 3.3 高性能匹配引擎
-- **路由决策**: 内部实现了基于前缀树（Trie）的域名匹配和 CIDR 匹配，规则量在万级时仍能保持微秒级判定。
-- **流式背压**: 完全基于 Go 的接口导向设计，确保在大流量下 CPU 负载极低且内存占用稳定。
+### 3.2 吞吐量极致优化
+针对高延迟链路 (High BDP Links)，实施了激进的参数调优：
+- **超大流控窗口**: `MaxConnectionReceiveWindow` 设为 **48MB**，`MaxStreamReceiveWindow` 设为 **32MB**。
+- **加速爬升 (Fast Ramp-up)**: 初始窗口 (Initial Window) 提升至 **4MB**。
+- **零损耗 I/O**: 大块传输缓冲区 (512KB) 显著降低 CPU 上下文切换。
