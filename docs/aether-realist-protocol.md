@@ -1,4 +1,4 @@
-# Aether-Realist 协议定义（V4）
+# Aether-Realist 协议定义（V5）
 
 > 状态：正式版本 (Finalized)
 
@@ -15,7 +15,7 @@
 - **承载层**：WebTransport over HTTP/3。
 - **无状态**：服务端仅在单个 WebTransport 会话范围内维护状态，关闭即释放。
 - **会话握手**：依赖 HTTP/3 + WebTransport 建立，不引入额外握手包。
-- **0-RTT 支持**：V4 版本 **开启 0-RTT** (Early Data)。为了防御重放攻击，协议内置了时间戳校验与 IV 去重缓存（ReplayCache）。
+- **0-RTT 支持**：V5 版本 **开启 0-RTT** (Early Data)。为了防御重放攻击，协议内置了时间戳校验与单调计数器校验。
 
 ## 2.1 握手状态机 (Handshake State Machine)
 
@@ -28,7 +28,7 @@
 
 ## 3. Record 帧结构
 
-每条 Record 采用统一的封装格式，V4 协议头长度为 **30 字节**：
+每条 Record 采用统一的封装格式，V5 协议头长度为 **30 字节**：
 
 ```
 0                   1                   2                   3
@@ -44,7 +44,7 @@
 +--------------------------+------------------------------------+
 |                     Padding Length (u32)                      |
 +---------------------------------------------------------------+
-|                        Nonce/IV (12B)                         |
+|                   Session ID (4B) | Ctr (8B)                  |
 +---------------------------------------------------------------+
 |                         Payload (var)                         |
 +---------------------------------------------------------------+
@@ -53,12 +53,13 @@
 ```
 
 - **Length Prefix**：Record 的总长度（Header + Payload + Padding），不包含自身长度字段。
-- **Version**：协议版本，V4 必须为 `0x04`。
+- **Version**：协议版本，V5 必须为 `0x05`。
 - **Type**：Record 类型。
 - **Timestamp Nano**：发送端纳秒时间戳，用于防御重放。
 - **Payload Length**：载荷长度。
 - **Padding Length**：填充长度。
-- **Nonce/IV**：12 字节随机值，用于 AEAD。
+- **Session ID**：4 字节随机会话标识，仅在会话建立时生成；客户端与服务端必须使用 **不同的 Session ID**（每个方向独立），以确保双向流量的 Nonce 不会碰撞。
+- **Ctr**：8 字节单调递增计数器，每发送一个 Record 必须自增 1，初始值为 `0`。
 
 ### 3.1 Record 类型
 
@@ -76,24 +77,39 @@
 
 Metadata Record 的 Payload 必须使用 `AES-128-GCM` 加密。
 
-- **Key Derivation (Zero-Sync V4)**：
-    - `PRK = HKDF-Extract(salt=IV, IKM=PSK)`。
-    - `Key = HKDF-Expand(PRK, info="aether-realist-v4", L=16)`。
-- **Nonce/IV**：Record Header 中的 12 字节随机值（IV）。
+- **Key Derivation (Zero-Sync V5)**：
+    - `PRK = HKDF-Extract(salt=SessionID, IKM=PSK)`。
+    - `Key = HKDF-Expand(PRK, info="aether-realist-v5", L=16)`。
+- **Nonce/IV**：`SessionID(4B) || Ctr(8B)` 拼接而成的 12 字节值；由于每个方向使用独立 Session ID，同一密钥下不会出现双向计数器冲突。
 - **AAD**：完整的 Record Header（30 字节）。通过将 Version 和 Timestamp 纳入 AAD，确保了协议头字段不可篡改。
+- **Authentication Tag**：固定 16 字节（128-bit），严禁截断。任何截断行为均视为协议违规，接收端必须拒绝处理。
 
 ## 5. 防重放机制 (Anti-Replay)
 
 服务端必须执行双重校验：
 1.  **时间窗口校验**：`|ServerTime - RecordTimestamp| < 30s`。
-2.  **IV 去重校验**：在 ReplayCache 中记录已收到的 IV，若 IV 重复则判定为重放攻击并丢弃。
+2.  **计数器校验**：对每条流维护最后接收计数器值，若 `Ctr` 非严格递增则判定为重放攻击并丢弃。
 
-## 6. 流量混淆 (Traffic Chunking)
+## 6. 密钥生命周期管理
+
+- **单 Session 最大加密次数**：每个 Session 最多加密 `2^32` 个 Record。
+- **达到阈值时**：客户端与服务端必须关闭当前 Session，客户端应立即重连以生成新的 Session ID 与密钥。
+- **阈值计算**：`Ctr >= 2^32` 即触发关闭流程，不得继续发送加密数据。
+
+## 7. 流量混淆 (Traffic Chunking)
 
 - 发送端应将数据流拆分为 **2KB - 16KB** 的随机大小片段。
 - 禁止基于 MTU 的对齐，以对抗统计学指纹分析。
 
-## 7. 错误处理与主动防御
+## 8. 错误处理与主动防御
 
 - **静默丢弃 (Silent Drop)**：对于非法版本、协议格式错误或认证失败的 Metadata 握手，服务端应直接关闭 Stream 引发“静默失败”，不得返回明文错误记录，以防止主动探测特征泄露。
 - **Error Record**：仅用于已建立连接后的业务逻辑错误反馈。
+
+### 8.1 握手失败的恒定时间处理
+
+为对抗时序侧信道攻击，所有握手阶段错误必须遵循以下原则：
+
+1. **统一时延窗口**：解密失败、格式错误、时间戳非法、计数器错误等所有错误路径必须在相同的时间范围内断开连接。
+2. **禁止早期中止**：即使检测到格式错误，也应完整读取 Record 后再执行统一延迟断开。
+3. **统一错误路径**：所有握手错误必须汇聚到同一处理函数，避免日志或行为泄露错误类型差异。
