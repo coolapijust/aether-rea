@@ -94,7 +94,11 @@ func (sm *sessionManager) initialize() error {
 func (sm *sessionManager) connect() error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	return sm.connectLocked()
+}
 
+// connectLocked establishes session while holding the lock.
+func (sm *sessionManager) connectLocked() error {
 	// If no URL configured, stay idle
 	if sm.config.URL == "" {
 		return nil
@@ -126,8 +130,6 @@ func (sm *sessionManager) connect() error {
 	// Emit event
 	localAddr := ""
 	remoteAddr := ""
-	// webtransport.Session doesn't have Connection() method
-	// Get address from the dial context if needed
 	sm.onEvent(NewSessionEstablishedEvent(sm.sessionID, localAddr, remoteAddr))
 
 	// Start session monitor
@@ -180,12 +182,23 @@ func (sm *sessionManager) OpenStream(ctx context.Context) (webtransport.Stream, 
 	defer sm.mu.Unlock()
 
 	if sm.session == nil {
-		return nil, 0, fmt.Errorf("no active session")
+		if err := sm.connectLocked(); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	stream, err := sm.session.OpenStreamSync(ctx)
 	if err != nil {
-		return nil, 0, err
+		// If session error, try to reconnect and retry once
+		log.Printf("[DEBUG] Open stream failed (session might be dead), retrying: %v", err)
+		sm.session = nil
+		if err := sm.connectLocked(); err != nil {
+			return nil, 0, err
+		}
+		stream, err = sm.session.OpenStreamSync(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	return stream, uint64(stream.StreamID()), nil
