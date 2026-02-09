@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::process::{Command, Child};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::Mutex;
 use tauri::{CustomMenuItem, SystemTray, SystemTrayMenu, SystemTrayEvent, Manager};
 
@@ -34,10 +36,16 @@ fn main() {
                 .or_else(|| app.path_resolver().resolve_resource("bin/aetherd.exe"))
                 .expect("failed to resolve aetherd binary");
             
-            let child = Command::new(core_path)
-                .arg("--api")
-                .arg("127.0.0.1:9880")
-                .spawn()
+            let mut cmd = Command::new(core_path);
+            cmd.arg("--api").arg("127.0.0.1:9880");
+
+            #[cfg(windows)]
+            {
+                // CREATE_NO_WINDOW = 0x08000000
+                cmd.creation_flags(0x08000000);
+            }
+            
+            let child = cmd.spawn()
                 .expect("failed to start aetherd");
             
             *app.state::<CoreProcess>().0.lock().unwrap() = Some(child);

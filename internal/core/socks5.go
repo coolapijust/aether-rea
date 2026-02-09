@@ -169,7 +169,11 @@ func (c *streamConn) Read(p []byte) (int, error) {
 	if !ok {
 		return 0, fmt.Errorf("stream not found")
 	}
-	return stream.Read(p)
+	n, err := stream.Read(p)
+	if n > 0 && c.core.metrics != nil {
+		c.core.metrics.RecordBytesReceived(uint64(n))
+	}
+	return n, err
 }
 
 func (c *streamConn) Write(p []byte) (int, error) {

@@ -119,7 +119,7 @@ export const useCoreStore = create<CoreStore>()(
       systemProxyEnabled: false,
       logs: [],
       maxLogs: 500,
-      language: 'en',
+      language: 'zh',
       setLanguage: (lang) => set({ language: lang }),
 
       connect: () => {
