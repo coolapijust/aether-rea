@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"crypto/sha256"
 	"io"
 	"log"
 	"sync"
