@@ -101,8 +101,9 @@ export default function Dashboard() {
   })();
 
   // Calculate real-time speed by computing delta
+  const lastMetrics = metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : null;
   const chartData = metricsHistory.slice(-31).map((m, i, arr) => {
-    if (i === 0) return { time: m.time, upload: 0, download: 0, latency: m.latencyMs || 0 };
+    if (i === 0) return { time: m.timestamp, upload: 0, download: 0, latency: m.latencyMs || 0 };
     const prev = arr[i - 1];
     const timeDiff = (m.timestamp - prev.timestamp) / 1000; // seconds
     if (timeDiff <= 0) return { time: m.timestamp, upload: 0, download: 0, latency: m.latencyMs || 0 };
