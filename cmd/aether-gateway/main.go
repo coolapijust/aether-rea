@@ -152,9 +152,12 @@ func main() {
 	}
 
 	quicConfig := &quic.Config{
-		EnableDatagrams: true,
-		MaxIdleTimeout:  60 * time.Second,
-		Tracer:          tracer,
+		EnableDatagrams:      true,
+		MaxIdleTimeout:       60 * time.Second,
+		MaxIncomingStreams:   1000,
+		MaxStreamReceiveWindow:     10 * 1024 * 1024, // 10 MB
+		MaxConnectionReceiveWindow: 15 * 1024 * 1024, // 15 MB
+		Tracer:               tracer,
 	}
 
 	server := webtransport.Server{
