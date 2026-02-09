@@ -284,8 +284,17 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, repla
 	reader := core.NewRecordReader(stream)
 
 	// Read Metadata
+	if err := stream.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		log.Printf("[SECURITY] [Stream %d] Failed to set metadata read deadline: %v", streamID, err)
+		return
+	}
 	record, err := reader.ReadNextRecord()
+	_ = stream.SetReadDeadline(time.Time{})
 	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			log.Printf("[SECURITY] [Stream %d] Metadata read timed out", streamID)
+			return
+		}
 		log.Printf("[SECURITY] [Stream %d] Failed to read metadata record: %v", streamID, err)
 		return
 	}
