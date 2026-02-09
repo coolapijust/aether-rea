@@ -7,15 +7,15 @@
 	}
 }
 
-{$DOMAIN} {
+:8080 {
 	# 1. 基础安全头与 H3 宣告
 	header {
 		# 强制 HSTS (1年)
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		# 防 MIME 嗅探
 		X-Content-Type-Options "nosniff"
-		# 宣告 H3 支持 (关键)
-		Alt-Svc `h3=":443"; ma=2592000`
+		# 宣告 H3 支持 (关键 - 本地 8080)
+		Alt-Svc `h3=":8080"; ma=2592000`
 		# 隐藏集成信息
 		-Server
 	}
@@ -43,6 +43,6 @@
 	# 4. 默认回落 (Decoy Site)
 	# 逻辑：所有非业务请求全部转发至伪装站点容器
 	handle {
-		reverse_proxy decoy-site:80
+		reverse_proxy localhost:8081
 	}
 }
