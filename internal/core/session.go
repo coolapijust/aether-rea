@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"net/url"
 	"strings"
@@ -40,6 +41,10 @@ func newSessionManager(config *SessionConfig, onEvent func(Event), metrics *Metr
 		ctx:     ctx,
 		cancel:  cancel,
 	}
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
 
 // updateConfig updates the session manager's configuration.
@@ -297,15 +302,12 @@ func (sm *sessionManager) monitorSession() {
 		sm.metrics.RecordSessionEnd()
 	}()
 
-	// Periodic ping loop
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
+	// Periodic ping loop with jitter
 	for {
 		select {
 		case <-sm.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(jitterDuration(4*time.Second, 7*time.Second)):
 			sm.pingOnce()
 		}
 	}
@@ -356,4 +358,12 @@ func (sm *sessionManager) pingOnce() {
 // generateSessionID creates a unique session identifier.
 func generateSessionID() string {
 	return fmt.Sprintf("sess-%d", time.Now().UnixNano())
+}
+
+func jitterDuration(min, max time.Duration) time.Duration {
+	if max <= min {
+		return min
+	}
+	diff := max - min
+	return min + time.Duration(rand.Int63n(int64(diff)+1))
 }

@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	mathrand "math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -63,6 +64,7 @@ var (
 
 func main() {
 	flag.Parse()
+	mathrand.Seed(time.Now().UnixNano())
 
 	log.Printf("Aether Gateway 3.2.0 starting")
 
@@ -284,7 +286,8 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, repla
 	reader := core.NewRecordReader(stream)
 
 	// Read Metadata
-	if err := stream.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+	readTimeout := jitterDuration(4*time.Second, 6*time.Second)
+	if err := stream.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
 		log.Printf("[SECURITY] [Stream %d] Failed to set metadata read deadline: %v", streamID, err)
 		return
 	}
@@ -292,10 +295,10 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, repla
 	_ = stream.SetReadDeadline(time.Time{})
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			log.Printf("[SECURITY] [Stream %d] Metadata read timed out", streamID)
+			handleHandshakeFailure(stream, streamID, "Metadata read timed out")
 			return
 		}
-		log.Printf("[SECURITY] [Stream %d] Failed to read metadata record: %v", streamID, err)
+		handleHandshakeFailure(stream, streamID, fmt.Sprintf("Failed to read metadata record: %v", err))
 		return
 	}
 
@@ -309,23 +312,23 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, repla
 	}
 
 	if record.Type != core.TypeMetadata {
-		log.Printf("[SECURITY] [Stream %d] Invalid record type: %d", streamID, record.Type)
+		handleHandshakeFailure(stream, streamID, fmt.Sprintf("Invalid record type: %d", record.Type))
 		return
 	}
 
 	if !core.IsTimestampValid(record.TimestampNano, time.Now(), core.DefaultReplayWindow) {
-		log.Printf("[SECURITY] [Stream %d] Timestamp outside allowed window", streamID)
+		handleHandshakeFailure(stream, streamID, "Timestamp outside allowed window")
 		return
 	}
 
 	if replayCache.SeenOrAdd(record.IV, time.Now()) {
-		log.Printf("[SECURITY] [Stream %d] Duplicate IV detected", streamID)
+		handleHandshakeFailure(stream, streamID, "Duplicate IV detected")
 		return
 	}
 
 	meta, err := core.DecryptMetadata(record, psk)
 	if err != nil {
-		log.Printf("[SECURITY] [Stream %d] Decrypt failed: %v", streamID, err)
+		handleHandshakeFailure(stream, streamID, fmt.Sprintf("Decrypt failed: %v", err))
 		return
 	}
 
@@ -410,6 +413,41 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, repla
 func writeError(w io.Writer, code uint16, msg string) {
 	record, _ := core.BuildErrorRecord(code, msg)
 	w.Write(record)
+}
+
+func handleHandshakeFailure(stream webtransport.Stream, streamID uint64, reason string) {
+	log.Printf("[SECURITY] [Stream %d] %s", streamID, reason)
+	time.Sleep(jitterDuration(100*time.Millisecond, 1000*time.Millisecond))
+	decoyLen, err := randomIntRange(32, 128)
+	if err != nil {
+		decoyLen = 64
+	}
+	decoy := make([]byte, decoyLen)
+	if _, err := rand.Read(decoy); err == nil {
+		_, _ = stream.Write(decoy)
+	}
+}
+
+func randomIntRange(min, max int) (int, error) {
+	if min < 0 || max < min {
+		return 0, fmt.Errorf("invalid range: %d-%d", min, max)
+	}
+	if min == max {
+		return min, nil
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(max-min+1)))
+	if err != nil {
+		return 0, err
+	}
+	return min + int(n.Int64()), nil
+}
+
+func jitterDuration(min, max time.Duration) time.Duration {
+	if max <= min {
+		return min
+	}
+	diff := max - min
+	return min + time.Duration(mathrand.Int63n(int64(diff)+1))
 }
 
 func generateSelfSignedCert(domain string) (tls.Certificate, error) {

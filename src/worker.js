@@ -238,11 +238,14 @@ function selectPadding(options, payloadLength) {
   const maxPadding = Number.isFinite(options.maxPadding)
     ? options.maxPadding
     : 0;
-  if (maxPadding <= 0) {
-    return 0;
+  const minPadMax = Math.min(32, maxPadding > 0 ? maxPadding : 32);
+  const minPadding = 1 + Math.floor(Math.random() * minPadMax);
+  if (maxPadding <= 0 || maxPadding <= minPadding) {
+    return minPadding;
   }
-  const limit = Math.min(maxPadding, 255 + payloadLength);
-  return Math.floor(Math.random() * limit);
+  const limit = Math.min(maxPadding - minPadding, 255 + payloadLength);
+  const extra = limit > 0 ? Math.floor(Math.random() * limit) : 0;
+  return minPadding + extra;
 }
 
 async function decryptMetadata(record, psk, streamId) {

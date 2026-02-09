@@ -64,6 +64,13 @@ type Record struct {
 	ErrorMessage  string
 }
 
+const (
+	metadataPaddingMin = 16
+	metadataPaddingMax = 256
+	dataPaddingMin     = 1
+	dataPaddingMax     = 32
+)
+
 // BuildMetadataRecord creates an encrypted metadata record.
 func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string) ([]byte, error) {
 	plaintext, err := buildMetadataPayload(host, port, maxPadding)
@@ -92,14 +99,22 @@ func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string
 
 	// Use final ciphertext length for AAD consistency
 	ciphertextLen := len(plaintext) + gcm.Overhead()
-	header, err := buildHeader(TypeMetadata, ciphertextLen, 0, iv)
+	paddingLen, err := randomPaddingRange(metadataPaddingMin, metadataPaddingMax)
+	if err != nil {
+		return nil, err
+	}
+	padding := make([]byte, paddingLen)
+	if _, err := rand.Read(padding); err != nil {
+		return nil, err
+	}
+	header, err := buildHeader(TypeMetadata, ciphertextLen, paddingLen, iv)
 	if err != nil {
 		return nil, err
 	}
 
 	ciphertext := gcm.Seal(nil, iv, plaintext, header)
 
-	return buildRecord(header, ciphertext, nil), nil
+	return buildRecord(header, ciphertext, padding), nil
 }
 
 // BuildDataRecord creates a data record with optional padding.
@@ -235,15 +250,38 @@ func deriveKey(psk string, salt []byte) ([]byte, error) {
 
 // randomPadding generates random padding length.
 func randomPadding(maxPadding uint16) int {
-	if maxPadding == 0 {
-		return 0
+	maxAllowed := int(maxPadding)
+	minCap := dataPaddingMax
+	if maxAllowed > 0 && maxAllowed < minCap {
+		minCap = maxAllowed
 	}
-	max := big.NewInt(int64(maxPadding) + 1)
-	n, err := rand.Int(rand.Reader, max)
+	minLen, err := randomPaddingRange(dataPaddingMin, minCap)
 	if err != nil {
 		return 0
 	}
-	return int(n.Int64())
+	if maxAllowed == 0 || maxAllowed <= minLen {
+		return minLen
+	}
+	extra, err := randomPaddingRange(0, maxAllowed-minLen)
+	if err != nil {
+		return minLen
+	}
+	return minLen + extra
+}
+
+func randomPaddingRange(min, max int) (int, error) {
+	if min < 0 || max < min {
+		return 0, fmt.Errorf("invalid padding range: %d-%d", min, max)
+	}
+	if min == max {
+		return min, nil
+	}
+	maxInt := big.NewInt(int64(max - min + 1))
+	n, err := rand.Int(rand.Reader, maxInt)
+	if err != nil {
+		return 0, err
+	}
+	return min + int(n.Int64()), nil
 }
 
 // DecryptMetadata decrypts the metadata record
