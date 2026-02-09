@@ -217,24 +217,7 @@ func DecryptMetadata(record *Record, psk string, streamID uint64) (*Metadata, er
 
 // ... (ParseMetadata and parseOptions remain same) ...
 
-// BuildErrorRecord creates an error record
-func BuildErrorRecord(code uint16, message string) ([]byte, error) {
-	messageBytes := []byte(message)
-	payload := make([]byte, 4+len(messageBytes))
-	binary.BigEndian.PutUint16(payload[0:2], code)
-	copy(payload[4:], messageBytes)
 
-	// Error records have 0 padding
-	// Header: Type(1) + PayloadLen(4) + PaddingLen(4) + IV(12)
-	header := make([]byte, RecordHeaderLength)
-	header[0] = TypeError
-	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
-	binary.BigEndian.PutUint32(header[8:12], 0)
-	
-	// IV is zero for error records
-	
-	return buildRecord(header, payload, nil), nil
-}
 
 // ParseMetadata parses the decrypted metadata payload
 func ParseMetadata(buffer []byte) (*Metadata, error) {
@@ -321,15 +304,15 @@ func BuildErrorRecord(code uint16, message string) ([]byte, error) {
 	copy(payload[4:], messageBytes)
 
 	// Error records have 0 padding
-	// Header: Type(1) + Reserved(3) + StreamID(8) + PayloadLen(4) + PaddingLen(4) + IV(12)
+	// Header: Type(1) + PayloadLen(4) + PaddingLen(4) + IV(12)
 	header := make([]byte, RecordHeaderLength)
 	header[0] = TypeError
-	// StreamID is 0 for error records (unauthenticated)
 	
-	binary.BigEndian.PutUint32(header[12:16], uint32(len(payload)))
-	binary.BigEndian.PutUint32(header[16:20], 0)
+	// Bytes 1-3 are reserved/padding
+	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
+	binary.BigEndian.PutUint32(header[8:12], 0)
 	
-	// IV is zero for error records
+	// IV is zero for error records, so we leave header[12:24] as 0
 	
 	return buildRecord(header, payload, nil), nil
 }
