@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	protocolLabel      = "aether-realist-v4"
-	protocolVersion    = 0x04
+	protocolLabel      = "aether-realist-v5"
+	protocolVersion    = 0x05
 	recordHeaderLength = 30
 	maxRecordSize      = 1 * 1024 * 1024
 	typeMetadata       = 0x01
@@ -42,17 +42,23 @@ const (
 	metadataPaddingMax = 256
 	dataPaddingMin     = 1
 	dataPaddingMax     = 32
+	// V5: Maximum counter value before rekey
+	maxCounterValue    = 1 << 32
 )
 
 const (
-	headerVersionOffset    = 0
-	headerTypeOffset       = 1
-	headerTimestampOffset  = 2
-	headerTimestampSize    = 8
-	headerPayloadLenOffset = 10
-	headerPaddingLenOffset = 14
-	headerIVOffset         = 18
-	headerIVLength         = 12
+	headerVersionOffset     = 0
+	headerTypeOffset        = 1
+	headerTimestampOffset   = 2
+	headerTimestampSize     = 8
+	headerPayloadLenOffset  = 10
+	headerPaddingLenOffset  = 14
+	// V5: SessionID + Counter instead of IV
+	headerSessionIDOffset   = 18
+	headerSessionIDLength   = 4
+	headerCounterOffset     = 22
+	headerCounterLength     = 8
+	nonceLength             = 12 // SessionID(4) + Counter(8)
 )
 
 type clientOptions struct {
@@ -142,6 +148,46 @@ type sessionManager struct {
 	counter     uint64
 	dialer      *webtransport.Dialer
 	closeSignal chan struct{}
+	nonceGen    *nonceGenerator // V5: Counter-based nonce generator
+}
+
+// nonceGenerator generates unique nonces using SessionID + monotonic counter.
+type nonceGenerator struct {
+	sessionID [4]byte
+	counter   uint64
+	mu        sync.Mutex
+}
+
+var errCounterExhausted = errors.New("counter exhausted, session rekey required")
+
+// newNonceGenerator creates a new NonceGenerator with random SessionID.
+func newNonceGenerator() (*nonceGenerator, error) {
+	ng := &nonceGenerator{}
+	if _, err := rand.Read(ng.sessionID[:]); err != nil {
+		return nil, err
+	}
+	return ng, nil
+}
+
+// next returns the next nonce (12 bytes) and counter value.
+func (ng *nonceGenerator) next() ([12]byte, uint64, error) {
+	ng.mu.Lock()
+	defer ng.mu.Unlock()
+
+	if ng.counter >= maxCounterValue {
+		return [12]byte{}, 0, errCounterExhausted
+	}
+
+	ng.counter++
+	var nonce [12]byte
+	copy(nonce[0:4], ng.sessionID[:])
+	binary.BigEndian.PutUint64(nonce[4:12], ng.counter)
+	return nonce, ng.counter, nil
+}
+
+// getSessionID returns the session ID.
+func (ng *nonceGenerator) getSessionID() [4]byte {
+	return ng.sessionID
 }
 
 func newSessionManager(opts clientOptions) (*sessionManager, error) {
@@ -202,10 +248,11 @@ func (m *sessionManager) resetSession() {
 	}
 	m.session = nil
 	m.counter = 0
+	m.nonceGen = nil // V5: Reset nonce generator
 }
 
 func (m *sessionManager) openStream(ctx context.Context, host string, port uint16) (net.Conn, error) {
-	session, streamID, err := m.getSession(ctx)
+	session, ng, err := m.getSession(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +262,8 @@ func (m *sessionManager) openStream(ctx context.Context, host string, port uint1
 		return nil, err
 	}
 
-	metadata, err := buildMetadataRecord(host, port, m.opts.maxPadding, m.opts.psk, streamID)
+	// V5: Pass NonceGenerator to buildMetadataRecord
+	metadata, err := buildMetadataRecord(host, port, m.opts.maxPadding, m.opts.psk, ng)
 	if err != nil {
 		return nil, err
 	}
@@ -223,23 +271,30 @@ func (m *sessionManager) openStream(ctx context.Context, host string, port uint1
 		return nil, err
 	}
 
-	return newWebTransportConn(stream, m.opts), nil
+	// V5: Pass NonceGenerator to webTransportConn for data records
+	return newWebTransportConn(stream, m.opts, ng), nil
 }
 
-func (m *sessionManager) getSession(ctx context.Context) (*webtransport.Session, uint64, error) {
+func (m *sessionManager) getSession(ctx context.Context) (*webtransport.Session, *nonceGenerator, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.session == nil {
 		session, err := m.dialSession(ctx)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 		m.session = session
 		m.counter = 0
+		// V5: Initialize NonceGenerator for counter-based nonce
+		m.nonceGen, err = newNonceGenerator()
+		if err != nil {
+			_ = session.CloseWithError(0, "nonce generator failed")
+			return nil, nil, err
+		}
 	}
 	m.counter += 1
-	return m.session, m.counter, nil
+	return m.session, m.nonceGen, nil
 }
 
 func (m *sessionManager) dialSession(ctx context.Context) (*webtransport.Session, error) {
@@ -280,15 +335,17 @@ type webTransportConn struct {
 	options    clientOptions
 	localAddr  net.Addr
 	remoteAddr net.Addr
+	nonceGen   *nonceGenerator // V5: Counter-based nonce generator
 }
 
-func newWebTransportConn(stream webtransport.Stream, opts clientOptions) *webTransportConn {
+func newWebTransportConn(stream webtransport.Stream, opts clientOptions, ng *nonceGenerator) *webTransportConn {
 	return &webTransportConn{
 		stream:     stream,
 		reader:     newRecordReader(stream),
 		options:    opts,
 		localAddr:  dummyAddr("aether-local"),
 		remoteAddr: dummyAddr("aether-remote"),
+		nonceGen:   ng,
 	}
 }
 
@@ -297,7 +354,8 @@ func (c *webTransportConn) Read(p []byte) (int, error) {
 }
 
 func (c *webTransportConn) Write(p []byte) (int, error) {
-	record, err := buildDataRecord(p, c.options.maxPadding)
+	// V5: Pass NonceGenerator to buildDataRecord
+	record, err := buildDataRecord(p, c.options.maxPadding, c.nonceGen)
 	if err != nil {
 		return 0, err
 	}
@@ -415,18 +473,22 @@ func readRecord(reader io.Reader) (*record, error) {
 	return result, nil
 }
 
-func buildMetadataRecord(host string, port uint16, maxPadding uint16, psk string, _ uint64) ([]byte, error) {
+// V5: buildMetadataRecord uses NonceGenerator for counter-based nonce
+func buildMetadataRecord(host string, port uint16, maxPadding uint16, psk string, ng *nonceGenerator) ([]byte, error) {
 	plaintext, err := buildMetadataPayload(host, port, maxPadding)
 	if err != nil {
 		return nil, err
 	}
 
-	iv := make([]byte, headerIVLength)
-	if _, err := rand.Read(iv); err != nil {
+	// V5: Get nonce from generator
+	nonce, counter, err := ng.next()
+	if err != nil {
 		return nil, err
 	}
+	sessionID := ng.getSessionID()
 
-	key, err := deriveKey(psk, iv)
+	// V5: Use SessionID as HKDF salt
+	key, err := deriveKey(psk, sessionID[:])
 	if err != nil {
 		return nil, err
 	}
@@ -449,17 +511,20 @@ func buildMetadataRecord(host string, port uint16, maxPadding uint16, psk string
 	if _, err := rand.Read(padding); err != nil {
 		return nil, err
 	}
-	header, err := buildHeader(typeMetadata, uint32(ciphertextLen), uint32(paddingLen), iv)
+	// V5: buildHeader takes SessionID and Counter
+	header, err := buildHeader(typeMetadata, uint32(ciphertextLen), uint32(paddingLen), sessionID[:], counter)
 	if err != nil {
 		return nil, err
 	}
 
-	ciphertext := gcm.Seal(nil, iv, plaintext, header)
+	// V5: Use nonce (SessionID || Counter) for encryption
+	ciphertext := gcm.Seal(nil, nonce[:], plaintext, header)
 
 	return buildRecord(header, ciphertext, padding), nil
 }
 
-func buildDataRecord(payload []byte, maxPadding uint16) ([]byte, error) {
+// V5: buildDataRecord uses NonceGenerator for counter-based nonce
+func buildDataRecord(payload []byte, maxPadding uint16, ng *nonceGenerator) ([]byte, error) {
 	paddingLength := randomPadding(maxPadding)
 	padding := make([]byte, paddingLength)
 	if paddingLength > 0 {
@@ -468,12 +533,15 @@ func buildDataRecord(payload []byte, maxPadding uint16) ([]byte, error) {
 		}
 	}
 
-	iv := make([]byte, headerIVLength)
-	if _, err := rand.Read(iv); err != nil {
+	// V5: Get nonce from generator
+	nonce, counter, err := ng.next()
+	if err != nil {
 		return nil, err
 	}
+	sessionID := ng.getSessionID()
 
-	header, err := buildHeader(typeData, uint32(len(payload)), uint32(len(padding)), iv)
+	// V5: buildHeader takes SessionID and Counter
+	header, err := buildHeader(typeData, uint32(len(payload)), uint32(len(padding)), sessionID[:], counter)
 	if err != nil {
 		return nil, err
 	}
@@ -491,9 +559,10 @@ func buildRecord(header, payload, padding []byte) []byte {
 	return record
 }
 
-func buildHeader(recordType byte, payloadLength uint32, paddingLength uint32, iv []byte) ([]byte, error) {
-	if len(iv) != headerIVLength {
-		return nil, fmt.Errorf("invalid IV length: %d", len(iv))
+// V5: buildHeader uses SessionID + Counter instead of IV
+func buildHeader(recordType byte, payloadLength uint32, paddingLength uint32, sessionID []byte, counter uint64) ([]byte, error) {
+	if len(sessionID) != headerSessionIDLength {
+		return nil, fmt.Errorf("invalid SessionID length: %d", len(sessionID))
 	}
 	header := make([]byte, recordHeaderLength)
 	header[headerVersionOffset] = protocolVersion
@@ -501,7 +570,9 @@ func buildHeader(recordType byte, payloadLength uint32, paddingLength uint32, iv
 	binary.BigEndian.PutUint64(header[headerTimestampOffset:headerTimestampOffset+headerTimestampSize], uint64(time.Now().UnixNano()))
 	binary.BigEndian.PutUint32(header[headerPayloadLenOffset:headerPayloadLenOffset+4], payloadLength)
 	binary.BigEndian.PutUint32(header[headerPaddingLenOffset:headerPaddingLenOffset+4], paddingLength)
-	copy(header[headerIVOffset:headerIVOffset+headerIVLength], iv)
+	// V5: Copy SessionID and Counter instead of IV
+	copy(header[headerSessionIDOffset:headerSessionIDOffset+headerSessionIDLength], sessionID)
+	binary.BigEndian.PutUint64(header[headerCounterOffset:headerCounterOffset+headerCounterLength], counter)
 	return header, nil
 }
 

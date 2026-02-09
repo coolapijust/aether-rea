@@ -352,7 +352,8 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, ng *c
 	conn, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
 	if err != nil {
 		log.Printf("[Stream %d] Connect failed: %v", streamID, err)
-		writeError(stream, 0x0004, "connect failed")
+		// V5: writeError now requires NonceGenerator
+		writeError(stream, 0x0004, "connect failed", ng)
 		return
 	}
 	defer conn.Close()
@@ -388,8 +389,8 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, ng *c
 		for {
 			n, err := conn.Read(buf)
 			if n > 0 {
-				// Encrypt/Wrap in Data Record
-				recordBytes, err := core.BuildDataRecord(buf[:n], meta.Options.MaxPadding)
+				// V5: Encrypt/Wrap in Data Record with NonceGenerator
+				recordBytes, err := core.BuildDataRecord(buf[:n], meta.Options.MaxPadding, ng)
 				if err != nil {
 					errCh <- err
 					return
@@ -424,8 +425,9 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, ng *c
 	// Cleanup happens via defer stream.Close() and defer conn.Close()
 }
 
-func writeError(w io.Writer, code uint16, msg string) {
-	record, _ := core.BuildErrorRecord(code, msg)
+// V5: writeError now requires NonceGenerator
+func writeError(w io.Writer, code uint16, msg string, ng *core.NonceGenerator) {
+	record, _ := core.BuildErrorRecord(code, msg, ng)
 	w.Write(record)
 }
 
