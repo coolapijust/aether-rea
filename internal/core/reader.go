@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"math/rand"
+	"time"
 )
 
 // RecordReader reads records from a stream.
@@ -109,25 +111,45 @@ func NewRecordReadWriter(rw io.ReadWriteCloser, maxPadding uint16) *RecordReadWr
 }
 
 // Write wraps data into core.Records before writing to the underlying stream.
+// Write wraps data into core.Records before writing to the underlying stream.
+// It splits large buffers into randomized chunks to obfuscate traffic patterns.
 func (rw *RecordReadWriter) Write(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
 
-	// For simplicity, we wrap the entire p in one Record.
-	// Max QUIC stream packet size typically handles 1400 bytes,
-	// but WebTransport handles larger chunks by splitting.
-	record, err := BuildDataRecord(p, rw.maxPadding)
-	if err != nil {
-		return 0, err
+	totalWritten := 0
+	src := p
+
+	// Use a local random source seeded by time to avoid global lock contention
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	for len(src) > 0 {
+		// Randomize chunk size between 2KB and 16KB
+		// This breaks the correlation between application writes and network packets
+		chunkSize := 2048 + rnd.Intn(14*1024) 
+		if chunkSize > len(src) {
+			chunkSize = len(src)
+		}
+
+		chunk := src[:chunkSize]
+		
+		// Build record with padding
+		record, err := BuildDataRecord(chunk, rw.maxPadding)
+		if err != nil {
+			return totalWritten, err
+		}
+
+		_, err = rw.writer.Write(record)
+		if err != nil {
+			return totalWritten, err
+		}
+
+		totalWritten += len(chunk)
+		src = src[chunkSize:]
 	}
 
-	_, err = rw.writer.Write(record)
-	if err != nil {
-		return 0, err
-	}
-
-	return len(p), nil
+	return totalWritten, nil
 }
 
 // Close closes the underlying stream.
