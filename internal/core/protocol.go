@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -167,6 +168,7 @@ func buildOptions(maxPadding uint16) []byte {
 
 // deriveKey derives AES key from PSK using HKDF.
 func deriveKey(psk string, salt []byte) ([]byte, error) {
+	psk = strings.TrimSpace(psk)
 	reader := hkdf.New(sha256.New, []byte(psk), salt, []byte(ProtocolLabel))
 	key := make([]byte, 16)
 	if _, err := io.ReadFull(reader, key); err != nil {
@@ -192,7 +194,21 @@ func DecryptMetadata(record *Record, psk string) (*Metadata, error) {
 	if psk == "" {
 		return nil, fmt.Errorf("missing psk")
 	}
-	key, err := deriveKey(psk, record.IV)
+
+	// Double check header size
+	if len(record.Header) != RecordHeaderLength {
+		return nil, fmt.Errorf("invalid header length: %d", len(record.Header))
+	}
+
+	// Clone IV and Header to prevent potential overlap issues in GCM Open
+	// In some environments, if nonce/AAD/ciphertext overlap, authentication fails.
+	iv := make([]byte, len(record.IV))
+	copy(iv, record.IV)
+	
+	header := make([]byte, len(record.Header))
+	copy(header, record.Header)
+
+	key, err := deriveKey(psk, iv)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +222,7 @@ func DecryptMetadata(record *Record, psk string) (*Metadata, error) {
 		return nil, err
 	}
 
-	plaintext, err := gcm.Open(nil, record.IV, record.Payload, record.Header)
+	plaintext, err := gcm.Open(nil, iv, record.Payload, header)
 	if err != nil {
 		return nil, err
 	}

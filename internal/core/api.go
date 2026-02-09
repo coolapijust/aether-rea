@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"crypto/sha256"
 	"io"
 	"log"
 	"sync"
@@ -610,6 +611,9 @@ func (c *Core) openStreamInternal(target TargetAddress, options map[string]inter
 	if v, ok := options["maxPadding"].(float64); ok {
 		maxPadding = uint16(v)
 	}
+
+	pskHash := sha256.Sum256([]byte(strings.TrimSpace(c.config.PSK)))
+	log.Printf("[DEBUG] Open stream (StreamID: %d, PSK Hash: %x...)", streamID, pskHash[:4])
 
 	metaRecord, err := BuildMetadataRecord(target.Host, uint16(target.Port), maxPadding, c.config.PSK)
 	if err != nil {
