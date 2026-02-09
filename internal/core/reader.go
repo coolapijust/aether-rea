@@ -53,6 +53,9 @@ func (r *RecordReader) ReadNextRecord() (*Record, error) {
 	if totalLength < RecordHeaderLength {
 		return nil, errors.New("invalid record length")
 	}
+	if totalLength > MaxRecordSize {
+		return nil, errors.New("record length exceeds max")
+	}
 
 	recordBytes := make([]byte, totalLength)
 	if _, err := io.ReadFull(r.reader, recordBytes); err != nil {

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,6 +33,7 @@ const (
 	protocolLabel      = "aether-realist-v4"
 	protocolVersion    = 0x04
 	recordHeaderLength = 30
+	maxRecordSize      = 1 * 1024 * 1024
 	typeMetadata       = 0x01
 	typeData           = 0x02
 	typeError          = 0x7f
@@ -369,6 +371,9 @@ func readRecord(reader io.Reader) (*record, error) {
 	if totalLength < recordHeaderLength {
 		return nil, errors.New("invalid record length")
 	}
+	if totalLength > maxRecordSize {
+		return nil, errors.New("record length exceeds max")
+	}
 
 	recordBytes := make([]byte, totalLength)
 	if _, err := io.ReadFull(reader, recordBytes); err != nil {
@@ -559,11 +564,12 @@ func randomPadding(maxPadding uint16) int {
 	if maxPadding == 0 {
 		return 0
 	}
-	n := make([]byte, 1)
-	if _, err := rand.Read(n); err != nil {
+	max := big.NewInt(int64(maxPadding) + 1)
+	n, err := rand.Int(rand.Reader, max)
+	if err != nil {
 		return 0
 	}
-	return int(n[0]) % int(maxPadding+1)
+	return int(n.Int64())
 }
 
 func parsePort(portStr string) (uint16, error) {

@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ const (
 	TypePing           = 0x03
 	TypePong           = 0x04
 	TypeError          = 0x7f
+	MaxRecordSize      = 1 * 1024 * 1024
 )
 
 const (
@@ -236,11 +238,12 @@ func randomPadding(maxPadding uint16) int {
 	if maxPadding == 0 {
 		return 0
 	}
-	n := make([]byte, 1)
-	if _, err := rand.Read(n); err != nil {
+	max := big.NewInt(int64(maxPadding) + 1)
+	n, err := rand.Int(rand.Reader, max)
+	if err != nil {
 		return 0
 	}
-	return int(n[0]) % int(maxPadding+1)
+	return int(n.Int64())
 }
 
 // DecryptMetadata decrypts the metadata record
@@ -384,6 +387,9 @@ func BuildErrorRecord(code uint16, message string) ([]byte, error) {
 	copy(payload[4:], messageBytes)
 
 	iv := make([]byte, headerIVLength)
+	if _, err := rand.Read(iv); err != nil {
+		return nil, err
+	}
 	header, err := buildHeader(TypeError, len(payload), 0, iv)
 	if err != nil {
 		return nil, err
