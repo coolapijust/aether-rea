@@ -71,7 +71,9 @@ func (r *RecordReader) ReadNextRecord() (*Record, error) {
 	timestamp := binary.BigEndian.Uint64(recordBytes[headerTimestampOffset : headerTimestampOffset+headerTimestampSize])
 	payloadLength := binary.BigEndian.Uint32(recordBytes[headerPayloadLenOffset : headerPayloadLenOffset+4])
 	paddingLength := binary.BigEndian.Uint32(recordBytes[headerPaddingLenOffset : headerPaddingLenOffset+4])
-	iv := recordBytes[headerIVOffset : headerIVOffset+headerIVLength]
+	// V5: Parse SessionID and Counter instead of IV
+	sessionID := recordBytes[headerSessionIDOffset : headerSessionIDOffset+headerSessionIDLength]
+	counter := binary.BigEndian.Uint64(recordBytes[headerCounterOffset : headerCounterOffset+headerCounterLength])
 
 	if !IsTimestampValid(timestamp, time.Now(), DefaultReplayWindow) {
 		return nil, errors.New("timestamp outside allowed window")
@@ -94,19 +96,11 @@ func (r *RecordReader) ReadNextRecord() (*Record, error) {
 		PaddingLength: paddingLength,
 		Payload:       payload,
 		Header:        header,
-		IV:            iv,
+		SessionID:     sessionID,
+		Counter:       counter,
 	}
 	if recordType == TypeError {
 		if len(payload) >= 4 {
-			// Skip 2 bytes error code?
-			// Worker.js: writeUint16(payload, 0, code); payload.set(messageBytes, 4);
-			// So payload[0-1] is code. payload[4:] is message?
-			// Wait, worker.js:
-			// const payload = new Uint8Array(4 + messageBytes.byteLength);
-			// writeUint16(payload, 0, code);
-			// payload.set(messageBytes, 4);
-			// So bytes 2 and 3 are 0?
-			// Yes.
 			result.ErrorMessage = string(payload[4:])
 		}
 	}
@@ -115,26 +109,29 @@ func (r *RecordReader) ReadNextRecord() (*Record, error) {
 
 // RecordReadWriter provides a unified io.ReadWriteCloser interface that handles
 // all Record wrapping/unwrapping automatically.
+// V5: Requires NonceGenerator for counter-based nonce.
 type RecordReadWriter struct {
 	*RecordReader
 	writer     io.Writer
 	closer     io.Closer
 	maxPadding uint16
+	nonceGen   *NonceGenerator
 }
 
 // NewRecordReadWriter creates a new RecordReadWriter.
-func NewRecordReadWriter(rw io.ReadWriteCloser, maxPadding uint16) *RecordReadWriter {
+// V5: Requires NonceGenerator for counter-based nonce.
+func NewRecordReadWriter(rw io.ReadWriteCloser, maxPadding uint16, ng *NonceGenerator) *RecordReadWriter {
 	return &RecordReadWriter{
 		RecordReader: NewRecordReader(rw),
 		writer:       rw,
 		closer:       rw,
 		maxPadding:   maxPadding,
+		nonceGen:     ng,
 	}
 }
 
 // Write wraps data into core.Records before writing to the underlying stream.
-// Write wraps data into core.Records before writing to the underlying stream.
-// It splits large buffers into randomized chunks to obfuscate traffic patterns.
+// V5: Uses NonceGenerator for counter-based nonce.
 func (rw *RecordReadWriter) Write(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -156,8 +153,8 @@ func (rw *RecordReadWriter) Write(p []byte) (n int, err error) {
 
 		chunk := src[:chunkSize]
 
-		// Build record with padding
-		record, err := BuildDataRecord(chunk, rw.maxPadding)
+		// V5: Build record with NonceGenerator
+		record, err := BuildDataRecord(chunk, rw.maxPadding, rw.nonceGen)
 		if err != nil {
 			return totalWritten, err
 		}

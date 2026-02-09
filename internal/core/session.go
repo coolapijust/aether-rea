@@ -29,6 +29,7 @@ type sessionManager struct {
 	cancel    context.CancelFunc
 	onEvent   func(Event)
 	metrics   *Metrics
+	nonceGen  *NonceGenerator // V5: Counter-based nonce generator
 }
 
 // newSessionManager creates a new session manager.
@@ -135,6 +136,14 @@ func (sm *sessionManager) connectLocked() error {
 
 	sm.session = session
 	sm.sessionID = generateSessionID()
+	
+	// V5: Initialize NonceGenerator for counter-based nonce
+	sm.nonceGen, err = NewNonceGenerator()
+	if err != nil {
+		_ = session.CloseWithError(0, "nonce generator failed")
+		return fmt.Errorf("nonce generator failed: %w", err)
+	}
+	
 	sm.metrics.RecordSessionStart()
 
 	// Emit event

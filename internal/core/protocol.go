@@ -6,19 +6,21 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/hkdf"
 )
 
 const (
-	ProtocolLabel      = "aether-realist-v4"
-	ProtocolVersion    = 0x04
+	ProtocolLabel      = "aether-realist-v5"
+	ProtocolVersion    = 0x05
 	RecordHeaderLength = 30
 	TypeMetadata       = 0x01
 	TypeData           = 0x02
@@ -26,18 +28,25 @@ const (
 	TypePong           = 0x04
 	TypeError          = 0x7f
 	MaxRecordSize      = 1 * 1024 * 1024
+	MaxCounterValue    = uint64(1 << 32) // 2^32 rekey threshold
 )
 
 const (
-	headerVersionOffset    = 0
-	headerTypeOffset       = 1
-	headerTimestampOffset  = 2
-	headerTimestampSize    = 8
-	headerPayloadLenOffset = 10
-	headerPaddingLenOffset = 14
-	headerIVOffset         = 18
-	headerIVLength         = 12
+	headerVersionOffset      = 0
+	headerTypeOffset         = 1
+	headerTimestampOffset    = 2
+	headerTimestampSize      = 8
+	headerPayloadLenOffset   = 10
+	headerPaddingLenOffset   = 14
+	headerSessionIDOffset    = 18
+	headerSessionIDLength    = 4
+	headerCounterOffset      = 22
+	headerCounterLength      = 8
+	nonceLength              = 12 // SessionID(4) + Counter(8)
 )
+
+// ErrCounterExhausted is returned when the counter reaches MaxCounterValue.
+var ErrCounterExhausted = errors.New("counter exhausted, session rekey required")
 
 // Metadata represents the connection target information
 type Metadata struct {
@@ -60,8 +69,56 @@ type Record struct {
 	PaddingLength uint32
 	Payload       []byte
 	Header        []byte
-	IV            []byte
+	SessionID     []byte
+	Counter       uint64
 	ErrorMessage  string
+}
+
+// NonceGenerator generates unique nonces using SessionID + monotonic counter.
+type NonceGenerator struct {
+	sessionID [4]byte
+	counter   uint64
+	mu        sync.Mutex
+}
+
+// NewNonceGenerator creates a new NonceGenerator with a random SessionID.
+func NewNonceGenerator() (*NonceGenerator, error) {
+	ng := &NonceGenerator{}
+	if _, err := rand.Read(ng.sessionID[:]); err != nil {
+		return nil, err
+	}
+	return ng, nil
+}
+
+// Next returns the next nonce (12 bytes) and the current counter value.
+// Returns ErrCounterExhausted if the counter reaches MaxCounterValue.
+func (ng *NonceGenerator) Next() ([12]byte, uint64, error) {
+	ng.mu.Lock()
+	defer ng.mu.Unlock()
+
+	if ng.counter >= MaxCounterValue {
+		return [12]byte{}, 0, ErrCounterExhausted
+	}
+
+	var nonce [12]byte
+	copy(nonce[0:4], ng.sessionID[:])
+	binary.BigEndian.PutUint64(nonce[4:12], ng.counter)
+
+	currentCounter := ng.counter
+	ng.counter++
+	return nonce, currentCounter, nil
+}
+
+// SessionID returns the session ID.
+func (ng *NonceGenerator) SessionID() [4]byte {
+	return ng.sessionID
+}
+
+// Counter returns the current counter value (for monitoring).
+func (ng *NonceGenerator) Counter() uint64 {
+	ng.mu.Lock()
+	defer ng.mu.Unlock()
+	return ng.counter
 }
 
 const (
@@ -72,18 +129,22 @@ const (
 )
 
 // BuildMetadataRecord creates an encrypted metadata record.
-func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string) ([]byte, error) {
+// V5: Requires NonceGenerator for counter-based nonce.
+func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string, ng *NonceGenerator) ([]byte, error) {
 	plaintext, err := buildMetadataPayload(host, port, maxPadding)
 	if err != nil {
 		return nil, err
 	}
 
-	iv := make([]byte, 12)
-	if _, err := rand.Read(iv); err != nil {
+	// V5: Get nonce from generator
+	nonce, counter, err := ng.Next()
+	if err != nil {
 		return nil, err
 	}
+	sessionID := nonce[0:4]
 
-	key, err := deriveKey(psk, iv)
+	// V5: Use SessionID as HKDF salt
+	key, err := deriveKey(psk, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,18 +168,20 @@ func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string
 	if _, err := rand.Read(padding); err != nil {
 		return nil, err
 	}
-	header, err := buildHeader(TypeMetadata, ciphertextLen, paddingLen, iv)
+	header, err := buildHeader(TypeMetadata, ciphertextLen, paddingLen, sessionID, counter)
 	if err != nil {
 		return nil, err
 	}
 
-	ciphertext := gcm.Seal(nil, iv, plaintext, header)
+	// V5: Nonce = SessionID || Counter
+	ciphertext := gcm.Seal(nil, nonce[:], plaintext, header)
 
 	return buildRecord(header, ciphertext, padding), nil
 }
 
 // BuildDataRecord creates a data record with optional padding.
-func BuildDataRecord(payload []byte, maxPadding uint16) ([]byte, error) {
+// V5: Requires NonceGenerator for counter-based nonce.
+func BuildDataRecord(payload []byte, maxPadding uint16, ng *NonceGenerator) ([]byte, error) {
 	paddingLength := randomPadding(maxPadding)
 	padding := make([]byte, paddingLength)
 	if paddingLength > 0 {
@@ -127,12 +190,14 @@ func BuildDataRecord(payload []byte, maxPadding uint16) ([]byte, error) {
 		}
 	}
 
-	iv := make([]byte, headerIVLength)
-	if _, err := rand.Read(iv); err != nil {
+	// V5: Get nonce from generator
+	nonce, counter, err := ng.Next()
+	if err != nil {
 		return nil, err
 	}
+	sessionID := nonce[0:4]
 
-	header, err := buildHeader(TypeData, len(payload), len(padding), iv)
+	header, err := buildHeader(TypeData, len(payload), len(padding), sessionID, counter)
 	if err != nil {
 		return nil, err
 	}
@@ -141,13 +206,15 @@ func BuildDataRecord(payload []byte, maxPadding uint16) ([]byte, error) {
 }
 
 // BuildPingRecord creates a ping record.
-func BuildPingRecord() ([]byte, error) {
-	return buildControlRecord(TypePing)
+// V5: Requires NonceGenerator for counter-based nonce.
+func BuildPingRecord(ng *NonceGenerator) ([]byte, error) {
+	return buildControlRecord(TypePing, ng)
 }
 
 // BuildPongRecord creates a pong record.
-func BuildPongRecord() ([]byte, error) {
-	return buildControlRecord(TypePong)
+// V5: Requires NonceGenerator for counter-based nonce.
+func BuildPongRecord(ng *NonceGenerator) ([]byte, error) {
+	return buildControlRecord(TypePong, ng)
 }
 
 // buildRecord assembles a complete record.
@@ -161,9 +228,9 @@ func buildRecord(header, payload, padding []byte) []byte {
 	return record
 }
 
-func buildHeader(recordType byte, payloadLen, paddingLen int, iv []byte) ([]byte, error) {
-	if len(iv) != headerIVLength {
-		return nil, fmt.Errorf("invalid IV length: %d", len(iv))
+func buildHeader(recordType byte, payloadLen, paddingLen int, sessionID []byte, counter uint64) ([]byte, error) {
+	if len(sessionID) != headerSessionIDLength {
+		return nil, fmt.Errorf("invalid SessionID length: %d", len(sessionID))
 	}
 
 	header := make([]byte, RecordHeaderLength)
@@ -172,16 +239,18 @@ func buildHeader(recordType byte, payloadLen, paddingLen int, iv []byte) ([]byte
 	binary.BigEndian.PutUint64(header[headerTimestampOffset:headerTimestampOffset+headerTimestampSize], uint64(time.Now().UnixNano()))
 	binary.BigEndian.PutUint32(header[headerPayloadLenOffset:headerPayloadLenOffset+4], uint32(payloadLen))
 	binary.BigEndian.PutUint32(header[headerPaddingLenOffset:headerPaddingLenOffset+4], uint32(paddingLen))
-	copy(header[headerIVOffset:headerIVOffset+headerIVLength], iv)
+	copy(header[headerSessionIDOffset:headerSessionIDOffset+headerSessionIDLength], sessionID)
+	binary.BigEndian.PutUint64(header[headerCounterOffset:headerCounterOffset+headerCounterLength], counter)
 	return header, nil
 }
 
-func buildControlRecord(recordType byte) ([]byte, error) {
-	iv := make([]byte, headerIVLength)
-	if _, err := rand.Read(iv); err != nil {
+func buildControlRecord(recordType byte, ng *NonceGenerator) ([]byte, error) {
+	nonce, counter, err := ng.Next()
+	if err != nil {
 		return nil, err
 	}
-	header, err := buildHeader(recordType, 0, 0, iv)
+	sessionID := nonce[0:4]
+	header, err := buildHeader(recordType, 0, 0, sessionID, counter)
 	if err != nil {
 		return nil, err
 	}
@@ -285,6 +354,7 @@ func randomPaddingRange(min, max int) (int, error) {
 }
 
 // DecryptMetadata decrypts the metadata record
+// V5: Uses SessionID as salt and SessionID||Counter as nonce
 func DecryptMetadata(record *Record, psk string) (*Metadata, error) {
 	if psk == "" {
 		return nil, fmt.Errorf("missing psk")
@@ -295,15 +365,19 @@ func DecryptMetadata(record *Record, psk string) (*Metadata, error) {
 		return nil, fmt.Errorf("invalid header length: %d", len(record.Header))
 	}
 
-	// Clone IV and Header to prevent potential overlap issues in GCM Open
-	// In some environments, if nonce/AAD/ciphertext overlap, authentication fails.
-	iv := make([]byte, len(record.IV))
-	copy(iv, record.IV)
+	// V5: Reconstruct nonce from SessionID + Counter
+	if len(record.SessionID) != headerSessionIDLength {
+		return nil, fmt.Errorf("invalid SessionID length: %d", len(record.SessionID))
+	}
+	var nonce [12]byte
+	copy(nonce[0:4], record.SessionID)
+	binary.BigEndian.PutUint64(nonce[4:12], record.Counter)
 
 	header := make([]byte, len(record.Header))
 	copy(header, record.Header)
 
-	key, err := deriveKey(psk, iv)
+	// V5: Use SessionID as HKDF salt
+	key, err := deriveKey(psk, record.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +391,7 @@ func DecryptMetadata(record *Record, psk string) (*Metadata, error) {
 		return nil, err
 	}
 
-	plaintext, err := gcm.Open(nil, iv, record.Payload, header)
+	plaintext, err := gcm.Open(nil, nonce[:], record.Payload, header)
 	if err != nil {
 		return nil, err
 	}
@@ -418,20 +492,25 @@ func parseOptions(buffer []byte) Options {
 }
 
 // BuildErrorRecord creates an error record
-func BuildErrorRecord(code uint16, message string) ([]byte, error) {
+// V5: Requires NonceGenerator for counter-based nonce.
+func BuildErrorRecord(code uint16, message string, ng *NonceGenerator) ([]byte, error) {
 	messageBytes := []byte(message)
 	payload := make([]byte, 4+len(messageBytes))
 	binary.BigEndian.PutUint16(payload[0:2], code)
 	copy(payload[4:], messageBytes)
 
-	iv := make([]byte, headerIVLength)
-	if _, err := rand.Read(iv); err != nil {
+	// V5: Get nonce from generator
+	nonce, counter, err := ng.Next()
+	if err != nil {
 		return nil, err
 	}
-	header, err := buildHeader(TypeError, len(payload), 0, iv)
+	sessionID := nonce[0:4]
+
+	header, err := buildHeader(TypeError, len(payload), 0, sessionID, counter)
 	if err != nil {
 		return nil, err
 	}
 
 	return buildRecord(header, payload, nil), nil
 }
+

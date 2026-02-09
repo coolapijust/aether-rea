@@ -611,7 +611,7 @@ func (c *Core) openStreamInternal(target TargetAddress, options map[string]inter
 		maxPadding = uint16(v)
 	}
 
-	metaRecord, err := BuildMetadataRecord(target.Host, uint16(target.Port), maxPadding, c.config.PSK)
+	metaRecord, err := BuildMetadataRecord(target.Host, uint16(target.Port), maxPadding, c.config.PSK, c.sessionMgr.nonceGen)
 	if err != nil {
 		stream.Close()
 		return StreamHandle{}, err
@@ -623,7 +623,8 @@ func (c *Core) openStreamInternal(target TargetAddress, options map[string]inter
 	}
 
 	// Wrap the stream in a RecordReadWriter to handle data-phase encapsulation
-	wrappedStream := NewRecordReadWriter(stream, maxPadding)
+	// V5: Pass NonceGenerator for counter-based nonce
+	wrappedStream := NewRecordReadWriter(stream, maxPadding, c.sessionMgr.nonceGen)
 
 	id := fmt.Sprintf("str-%d-%d", streamID, time.Now().UnixNano())
 	handle := StreamHandle{ID: id}

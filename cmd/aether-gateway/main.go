@@ -172,7 +172,7 @@ func main() {
 		},
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
-	replayCache := core.NewReplayCache(core.DefaultReplayWindow)
+	// V5: ReplayCache removed - using counter-based anti-replay
 
 	http.HandleFunc(*secretPath, func(w http.ResponseWriter, r *http.Request) {
 		// Log every attempt to the secret path
@@ -189,7 +189,13 @@ func main() {
 		}
 
 		log.Printf("[INFO] WebTransport session upgraded for %s", r.RemoteAddr)
-		handleSession(session, *psk, replayCache)
+		// V5: Create NonceGenerator per session for counter-based nonce
+		ng, err := core.NewNonceGenerator()
+		if err != nil {
+			log.Printf("[ERROR] Failed to create NonceGenerator: %v", err)
+			return
+		}
+		handleSession(session, *psk, ng)
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +271,9 @@ func main() {
 	}
 }
 
-func handleSession(session *webtransport.Session, psk string, replayCache *core.ReplayCache) {
+// handleSession processes incoming streams for a WebTransport session.
+// V5: Uses NonceGenerator for counter-based nonce instead of ReplayCache.
+func handleSession(session *webtransport.Session, psk string, ng *core.NonceGenerator) {
 	log.Println("New session established")
 
 	for {
@@ -276,14 +284,17 @@ func handleSession(session *webtransport.Session, psk string, replayCache *core.
 		}
 
 		id := uint64(stream.StreamID())
-		go handleStream(stream, psk, id, replayCache)
+		go handleStream(stream, psk, id, ng)
 	}
 }
 
-func handleStream(stream webtransport.Stream, psk string, streamID uint64, replayCache *core.ReplayCache) {
+// handleStream processes a single bidirectional stream.
+// V5: Uses counter-based anti-replay with per-stream lastCounter tracking.
+func handleStream(stream webtransport.Stream, psk string, streamID uint64, ng *core.NonceGenerator) {
 	defer stream.Close()
 
 	reader := core.NewRecordReader(stream)
+	var lastCounter uint64 = 0 // V5: Per-stream counter tracking
 
 	// Read Metadata
 	readTimeout := jitterDuration(4*time.Second, 6*time.Second)
@@ -303,7 +314,8 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, repla
 	}
 
 	if record.Type == core.TypePing {
-		pongRecord, err := core.BuildPongRecord()
+		// V5: BuildPongRecord requires NonceGenerator
+		pongRecord, err := core.BuildPongRecord(ng)
 		if err != nil {
 			return
 		}
@@ -321,10 +333,12 @@ func handleStream(stream webtransport.Stream, psk string, streamID uint64, repla
 		return
 	}
 
-	if replayCache.SeenOrAdd(record.IV, time.Now()) {
-		handleHandshakeFailure(stream, streamID, "Duplicate IV detected")
+	// V5: Counter-based anti-replay (first record counter must be 0 or strictly increasing)
+	if record.Counter != 0 && record.Counter <= lastCounter {
+		handleHandshakeFailure(stream, streamID, "Counter not strictly increasing")
 		return
 	}
+	lastCounter = record.Counter
 
 	meta, err := core.DecryptMetadata(record, psk)
 	if err != nil {
