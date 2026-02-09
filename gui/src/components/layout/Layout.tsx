@@ -54,9 +54,9 @@ export default function Layout({
 
   const menuItems = [
     { id: 'dashboard', label: t.nav.dashboard, icon: HomeIcon },
-    { id: 'proxy', label: '代理', icon: ProxyIcon }, // TODO: Add to i18n
-    { id: 'rules', label: '规则', icon: RulesIcon }, // TODO: Add to i18n
-    { id: 'connections', label: '连接', icon: ConnectionsIcon }, // TODO: Add to i18n
+    { id: 'proxy', label: t.nav.proxy, icon: ProxyIcon },
+    { id: 'rules', label: t.nav.rules, icon: RulesIcon },
+    { id: 'connections', label: t.nav.connections, icon: ConnectionsIcon },
     { id: 'logs', label: t.nav.logs, icon: LogsIcon },
     { id: 'settings', label: t.nav.settings, icon: SettingsIcon },
   ];
