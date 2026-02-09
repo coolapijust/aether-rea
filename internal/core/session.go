@@ -344,7 +344,7 @@ func (sm *sessionManager) pingOnce() {
 	}
 	defer stream.Close()
 
-	pingRecord, err := BuildPingRecord()
+	pingRecord, err := BuildPingRecord(sm.nonceGen)
 	if err != nil {
 		return
 	}
