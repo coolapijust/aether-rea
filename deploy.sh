@@ -37,12 +37,22 @@ GITHUB_RAW_BASE="https://raw.githubusercontent.com/coolapijust/Aether-Realist/ma
 
 download_file() {
     local FILE_PATH=$1
+    local FORCE_UPDATE=$2
     local URL="$GITHUB_RAW_BASE/$FILE_PATH"
+    
+    if [ -f "$FILE_PATH" ] && [ "$FORCE_UPDATE" = "true" ]; then
+        # 如果是强制更新且文件已存在，先备份
+        mv "$FILE_PATH" "${FILE_PATH}.bak"
+        echo -e "已备份旧的 ${YELLOW}$FILE_PATH${NC} 为 ${YELLOW}${FILE_PATH}.bak${NC}"
+    fi
+
     if [ ! -f "$FILE_PATH" ]; then
-        echo -e "正在从 GitHub 下载 ${YELLOW}$FILE_PATH${NC}..."
+        echo -e "正在从 GitHub 获取/更新 ${YELLOW}$FILE_PATH${NC}..."
         mkdir -p "$(dirname "$FILE_PATH")"
         if ! curl -sL "$URL" -o "$FILE_PATH"; then
              echo -e "${RED}错误: 下载 $FILE_PATH 失败，请检查网络。${NC}"
+             # 如果下载失败且有备份，还原备份
+             [ -f "${FILE_PATH}.bak" ] && mv "${FILE_PATH}.bak" "$FILE_PATH"
              exit 1
         fi
     fi
@@ -52,10 +62,11 @@ download_file() {
 mkdir -p deploy/certs
 chmod 755 deploy/certs
 
-# 下载缺失的关键文件
-download_file "deploy/docker-compose.yml"
-download_file "deploy/.env.example"
-download_file "deploy/Caddyfile"
+# 强制更新编排文件（核心逻辑，包含 bugfix）
+download_file "deploy/docker-compose.yml" "true"
+download_file "deploy/Caddyfile" "true"
+# 仅下载缺失的配置模板
+download_file "deploy/.env.example" "false"
 
 echo -e "${GREEN}目录结构与依赖文件已就绪。${NC}"
 
