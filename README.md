@@ -61,21 +61,19 @@ graph TD
 ## 🛠️ 快速开始
 
 ### 1. 服务端部署
-推荐在生产环境使用 **一键部署脚本**。它集成了自动化环境检查、TLS 证书申领与内核优化：
+通过 **一键脚本** 即可在几秒内启动完整的生产级网关：
 
 ```bash
-# 赋予执行权限并运行
-chmod +x deploy.sh && ./deploy.sh
-# 脚本将引导您完成域名与密钥配置
+# 直接从 GitHub 执行
+bash <(curl -sL https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/deploy.sh)
 ```
 
-或者使用 Docker Compose 手动部署：
+脚本将自动：
+1. 检查 Docker 环境。
+2. 下载必要的配置文件。
+3. 引导您设置域名 (`DOMAIN`) 与预共享密钥 (`PSK`)。
+4. 启动服务。
 
-```bash
-cd deploy
-cp .env.example .env && vi .env # 配置域名与私钥
-docker compose up -d
-```
 > 详细参数配置请参阅：[部署指南](docs/deployment.md)
 
 ### 2. 本地客户端

@@ -6,18 +6,14 @@
 
 ## 0. 快速启动 (推荐)
 
-如果你在 Linux 环境下部署，可以使用内置的一键脚本。它会自动检查环境、配置域名与密钥，并启动服务。
+直接运行以下命令，脚本将自动下载依赖并完成配置：
 
 ```bash
-# 下载并赋予执行权限
-chmod +x deploy.sh
-
-# 运行部署脚本
-./deploy.sh
+bash <(curl -sL https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/deploy.sh)
 ```
 
 > [!TIP]
-> 脚本会引导你输入 `DOMAIN` (域名) 和 `PSK` (预共享密钥)。如果你已经准备好了 `.env` 文件，脚本将直接读取配置。
+> 脚本会引导你输入 `DOMAIN` (域名) 和 `PSK` (预共享密钥)。如果您处于中国大陆环境，请确保您的服务器可以正常访问 GitHub Raw 服务。
 
 ---
 

@@ -30,11 +30,34 @@ fi
 
 echo -e "${GREEN}环境检查通过。${NC}"
 
-# 2. 目录准备
-echo -e "\n${YELLOW}[2/5] 准备工作目录...${NC}"
+# 2. 目录与依赖准备
+echo -e "\n${YELLOW}[2/5] 准备工作目录与依赖...${NC}"
+
+GITHUB_RAW_BASE="https://raw.githubusercontent.com/coolapijust/Aether-Realist/main"
+
+download_file() {
+    local FILE_PATH=$1
+    local URL="$GITHUB_RAW_BASE/$FILE_PATH"
+    if [ ! -f "$FILE_PATH" ]; then
+        echo -e "正在从 GitHub 下载 ${YELLOW}$FILE_PATH${NC}..."
+        mkdir -p "$(dirname "$FILE_PATH")"
+        if ! curl -sL "$URL" -o "$FILE_PATH"; then
+             echo -e "${RED}错误: 下载 $FILE_PATH 失败，请检查网络。${NC}"
+             exit 1
+        fi
+    fi
+}
+
+# 确保 deploy 目录存在
 mkdir -p deploy/certs
 chmod 755 deploy/certs
-echo -e "${GREEN}目录结构已就绪。${NC}"
+
+# 下载缺失的关键文件
+download_file "deploy/docker-compose.yml"
+download_file "deploy/.env.example"
+download_file "deploy/Caddyfile"
+
+echo -e "${GREEN}目录结构与依赖文件已就绪。${NC}"
 
 # 3. 配置初始化
 echo -e "\n${YELLOW}[3/5] 配置环境变量...${NC}"
