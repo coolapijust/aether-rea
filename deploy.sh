@@ -110,34 +110,59 @@ install_service() {
     if ! check_port 80 && ! check_port 443; then
         echo -e "${GREEN}检测到 80/443 端口空闲，将启用自动 HTTPS (Let's Encrypt)。${NC}"
         CADDY_SITE_ADDRESS="{$DOMAIN}"
-        TLS_CONFIG="internal" # 实际上 Caddy 会自动覆盖，但给个默认值
+        CADDY_PORT="443"
+        TLS_CONFIG="internal" 
     else
         echo -e "${YELLOW}检测到 80/443 端口被占用。${NC}"
-        echo "请选择证书策略 (将运行在 8080 端口):"
+        
+        # 默认回落端口
+        DEFAULT_PORT=8080
+        if check_port $DEFAULT_PORT; then
+            echo -e "${RED}警告: 默认回落端口 $DEFAULT_PORT 也被占用！${NC}"
+            read -p "请输入一个新的可用端口 (例如 8443): " CUSTOM_PORT
+            CADDY_PORT=${CUSTOM_PORT:-$DEFAULT_PORT}
+            while check_port $CADDY_PORT; do
+                read -p "${RED}端口 $CADDY_PORT 仍被占用，请重新输入: ${NC}" CADDY_PORT
+            done
+        else
+            CADDY_PORT=$DEFAULT_PORT
+        fi
+
+        echo -e "${GREEN}将使用端口: $CADDY_PORT${NC}"
+        CADDY_SITE_ADDRESS=":$CADDY_PORT"
+
+        echo "请选择证书策略:"
         echo "1) 我有自己的证书 (输入路径)"
         echo "2) 自动生成自签名证书 (仅测试用)"
         read -p "请输入选项 [1/2]: " CERT_OPTION
-
-        CADDY_SITE_ADDRESS=":8080"
         
         if [ "$CERT_OPTION" = "1" ]; then
-            echo -e "${YELLOW}请输入证书的【完整文件路径】${NC}"
-            echo "示例: /root/cert/fullchain.pem"
-            read -p "证书路径 (.crt/.pem): " CERT_PATH
-            read -p "私钥路径 (.key): " KEY_PATH
+            while true; do
+                echo -e "\n${YELLOW}请输入证书的【完整文件路径】${NC}"
+                echo "示例: /root/cert/fullchain.pem"
+                read -p "证书路径 (.crt/.pem): " CERT_PATH
+                read -p "私钥路径 (.key): " KEY_PATH
 
-            if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
-                echo -e "已确认证书: ${GREEN}$CERT_PATH${NC}"
-                echo -e "已确认私钥: ${GREEN}$KEY_PATH${NC}"
-                mkdir -p deploy/certs
-                cp "$CERT_PATH" deploy/certs/manual.crt
-                cp "$KEY_PATH" deploy/certs/manual.key
-                TLS_CONFIG="/certs/manual.crt /certs/manual.key"
-            else
-                echo -e "${RED}错误：找不到指定的文件，请检查路径是否正确。${NC}"
-                echo -e "将回退到自签名模式。"
-                CERT_OPTION="2"
-            fi
+                if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+                    echo -e "已确认证书: ${GREEN}$CERT_PATH${NC}"
+                    echo -e "已确认私钥: ${GREEN}$KEY_PATH${NC}"
+                    mkdir -p deploy/certs
+                    cp "$CERT_PATH" deploy/certs/manual.crt
+                    cp "$KEY_PATH" deploy/certs/manual.key
+                    TLS_CONFIG="/certs/manual.crt /certs/manual.key"
+                    break
+                else
+                    echo -e "${RED}错误：找不到指定路径的文件。${NC}"
+                    echo "1) 重新输入路径"
+                    echo "2) 放弃并改用自签名证书"
+                    read -p "请选择 [1/2]: " RETRY_OPTION
+                    if [ "$RETRY_OPTION" != "1" ]; then
+                        echo -e "${YELLOW}正在切换到自签名模式...${NC}"
+                        CERT_OPTION="2"
+                        break
+                    fi
+                fi
+            done
         fi
 
         if [ "$CERT_OPTION" != "1" ]; then
@@ -154,8 +179,10 @@ install_service() {
 
     # 写入环境变量文件 (覆盖旧的配置)
     sed -i "/^CADDY_SITE_ADDRESS=/d" "$ENV_FILE"
+    sed -i "/^CADDY_PORT=/d" "$ENV_FILE"
     sed -i "/^TLS_CONFIG=/d" "$ENV_FILE"
     echo "CADDY_SITE_ADDRESS=$CADDY_SITE_ADDRESS" >> "$ENV_FILE"
+    echo "CADDY_PORT=$CADDY_PORT" >> "$ENV_FILE"
     echo "TLS_CONFIG=$TLS_CONFIG" >> "$ENV_FILE"
 
     # 4.5 内核优化 (可选)

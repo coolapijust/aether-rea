@@ -8,7 +8,7 @@
 
 # 动态监听地址 (由 deploy.sh 根据端口占用情况注入)
 # 模式 A: 80/443 可用 -> {$DOMAIN} (自动 HTTPS)
-# 模式 B: 端口被占 -> :8080 (配合 tls internal 或手动证书)
+# 模式 B: 端口被占 -> :$CADDY_PORT (配合 tls internal 或手动证书)
 {$CADDY_SITE_ADDRESS} {
 	# TLS 配置 (auto / internal / /certs/xxx.pem)
 	tls {$TLS_CONFIG}
@@ -18,8 +18,8 @@
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		# 防 MIME 嗅探
 		X-Content-Type-Options "nosniff"
-		# 宣告 H3 支持 (关键 - 本地 8080)
-		Alt-Svc `h3=":8080"; ma=2592000`
+		# 宣告 H3 支持 (关键 - 动态端口)
+		Alt-Svc `h3=":{$CADDY_PORT}"; ma=2592000`
 		# 隐藏集成信息
 		-Server
 	}

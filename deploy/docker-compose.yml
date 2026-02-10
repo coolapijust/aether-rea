@@ -11,6 +11,7 @@ services:
     environment:
       - DOMAIN=${DOMAIN}
       - CADDY_SITE_ADDRESS=${CADDY_SITE_ADDRESS}
+      - CADDY_PORT=${CADDY_PORT}
       - TLS_CONFIG=${TLS_CONFIG}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
@@ -31,7 +32,7 @@ services:
     network_mode: host
     environment:
       - PSK=${PSK}
-      - LISTEN_ADDR=:8080 
+      - LISTEN_ADDR=:8090 
       - SSL_CERT_FILE=/certs/fullchain.pem
       - SSL_KEY_FILE=/certs/privkey.pem
     volumes:
