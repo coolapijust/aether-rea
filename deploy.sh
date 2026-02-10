@@ -121,50 +121,21 @@ install_service() {
         CADDY_SITE_ADDRESS=":8080"
         
         if [ "$CERT_OPTION" = "1" ]; then
-            echo -e "${YELLOW}请输入证书所在的【目录路径】或【完整文件路径】${NC}"
-            echo "示例: /root/cert 或 /root/cert/fullchain.pem"
-            read -p "证书路径 (.crt/.pem): " CERT_INPUT
-            read -p "私钥路径 (.key): " KEY_INPUT
-            
-            # 智能识别逻辑：支持目录或文件路径，并仅通过【文件内容】校验（忽略扩展名）
-            find_cert_files() {
-                local SEARCH_PATH="$1"
-                # 如果输入是目录，扫描目录下的所有常规文件；如果是文件，直接检查该文件
-                if [ -d "$SEARCH_PATH" ]; then
-                    FILES=$(find "$SEARCH_PATH" -maxdepth 1 -type f)
-                else
-                    FILES="$SEARCH_PATH"
-                fi
-
-                for f in $FILES; do
-                    # 调试输出：正在检查文件
-                    # echo "正在检查: $f" 
-                    if grep -q "BEGIN CERTIFICATE" "$f"; then
-                        CERT_PATH="$f"
-                    # 使用宽容的正则匹配私钥 (RSA/EC/OPENSSL等)
-                    # 注意：有些 grep 需要 -E 启用正则，有些默认支持
-                    elif grep -E -q "BEGIN.*PRIVATE KEY" "$f"; then
-                        KEY_PATH="$f"
-                    fi
-                done
-            }
-
-            # 第一次通过输入寻找
-            find_cert_files "$CERT_INPUT"
-            # 如果没找全，再通过第二个输入寻找 (允许用户分别输入两个目录，或者一个目录一个文件)
-            find_cert_files "$KEY_INPUT"
+            echo -e "${YELLOW}请输入证书的【完整文件路径】${NC}"
+            echo "示例: /root/cert/fullchain.pem"
+            read -p "证书路径 (.crt/.pem): " CERT_PATH
+            read -p "私钥路径 (.key): " KEY_PATH
 
             if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
-                echo -e "已识别证书: ${GREEN}$CERT_PATH${NC}"
-                echo -e "已识别私钥: ${GREEN}$KEY_PATH${NC}"
+                echo -e "已确认证书: ${GREEN}$CERT_PATH${NC}"
+                echo -e "已确认私钥: ${GREEN}$KEY_PATH${NC}"
                 mkdir -p deploy/certs
                 cp "$CERT_PATH" deploy/certs/manual.crt
                 cp "$KEY_PATH" deploy/certs/manual.key
                 TLS_CONFIG="/certs/manual.crt /certs/manual.key"
             else
-                echo -e "${RED}错误：未能找到有效的证书/私钥对。${NC}"
-                echo -e "请确保文件中包含 'BEGIN CERTIFICATE' 和 'BEGIN ... PRIVATE KEY'"
-                echo "DEBUG: Cert=$CERT_PATH, Key=$KEY_PATH"
+                echo -e "${RED}错误：找不到指定的文件，请检查路径是否正确。${NC}"
+                echo -e "将回退到自签名模式。"
                 CERT_OPTION="2"
             fi
         fi
