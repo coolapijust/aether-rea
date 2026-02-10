@@ -54,7 +54,6 @@ install_service() {
 
     # 强制更新编排文件
     download_file "deploy/docker-compose.yml" "true"
-    download_file "deploy/Caddyfile" "true"
     download_file "deploy/.env.example" "false"
 
     echo -e "\n${YELLOW}[3/4] 配置环境变量...${NC}"
@@ -130,13 +129,11 @@ install_service() {
 
         echo -e "${GREEN}将使用端口: $CADDY_PORT${NC}"
         CADDY_SITE_ADDRESS=":$CADDY_PORT"
+    fi
 
-        echo "请选择证书策略:"
-        echo "1) 我有自己的证书 (输入路径)"
-        echo "2) 自动生成自签名证书 (仅测试用)"
-        read -p "请输入选项 [1/2]: " CERT_OPTION
-        
-        echo "请选择伪装站点类型 (将在 443 端口展示，完美匹配流量特征):"
+    # 4. 多态伪装站点配置 (迁移至独立目录)
+    echo -e "\n${YELLOW}[4/4] 配置多态伪装系统...${NC}"
+    echo "请选择伪装站点类型 (将在 443/监听端口 展示):"
         echo "1) [推荐] 专业流媒体诊断站 (Speedtest/Stream Check)"
         echo "2) [推荐] 云端协作平台门户 (Creative Cloud Login)"
         echo "3) [自定义] Git 仓库地址 (例如 GitHub Pages)"
@@ -295,17 +292,8 @@ show_status() {
 }
 
 view_logs() {
-    echo -e "\n${YELLOW}请选择要查看日志的服务：${NC}"
-    echo "1) 网关 (Gateway/Caddy)"
-    echo "2) 后端 (Backend)"
-    echo "3) 所有日志"
-    read -p "请输入 [1-3]: " LOG_OPT
-    case $LOG_OPT in
-        1) docker compose -f deploy/docker-compose.yml logs -f --tail 100 gateway ;;
-        2) docker compose -f deploy/docker-compose.yml logs -f --tail 100 backend ;;
-        3) docker compose -f deploy/docker-compose.yml logs -f --tail 100 ;;
-        *) echo "无效指令" ;;
-    esac
+    echo -e "\n${YELLOW}查看 Aether 核心服务日志...${NC}"
+    docker compose -f deploy/docker-compose.yml logs -f --tail 100
 }
 
 check_bbr() {
