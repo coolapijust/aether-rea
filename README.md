@@ -64,8 +64,8 @@ graph TD
 通过 **一键脚本** 即可在几秒内启动完整的生产级网关：
 
 ```bash
-# 直接从 GitHub 执行
-bash <(curl -sL https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/deploy.sh)
+# 直接从 GitHub 执行 (强制刷新缓存)
+bash <(curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/deploy.sh?$(date +%s)")
 ```
 
 脚本将自动：

@@ -18,22 +18,20 @@ services:
 
     depends_on:
       - decoy-site
-      - aether-gateway-backend
+      - aether-backend
 
   # 2. 伪装站点
-  # 监听 8081 端口，由 Caddy 反代或在 Host 模式下直接共存
   decoy-site:
-    build:
-      context: ./decoy
+    image: nginx:alpine
     container_name: decoy-site
     restart: always
     network_mode: host
+    # 模拟简单文档页面
+    command: /bin/sh -c "echo '<h1>Aether-Realist Documentation</h1>' > /usr/share/nginx/html/index.html && sed -i 's/listen\(.*\)80;/listen 8081;/' /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
 
   # 3. Aether 核心服务端 (Go)
-  aether-gateway-backend:
-    build:
-      context: ..
-      dockerfile: Dockerfile
+  aether-backend:
+    image: ghcr.io/coolapijust/aether-realist:main
     container_name: aether-gateway-backend
     restart: always
     network_mode: host
