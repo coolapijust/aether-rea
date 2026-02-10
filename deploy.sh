@@ -275,8 +275,8 @@ EOF
             docker volume rm deploy_caddy_data >/dev/null 2>&1
         fi
         
-        # 清理旧的 Caddyfile
-        [ -f "deploy/Caddyfile" ] && rm "deploy/Caddyfile"
+        # 清理旧的 Caddyfile (防止 Docker 自动创建的同名目录导致挂载失败)
+        [ -e "deploy/Caddyfile" ] && rm -rf "deploy/Caddyfile"
         echo -e "${GREEN}旧环境清理完成，准备接入 Host 直连模式。${NC}"
     }
 
