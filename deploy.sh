@@ -31,7 +31,7 @@ download_file() {
     if [ ! -f "$FILE_PATH" ]; then
         echo -e "正在从 GitHub 获取/更新 ${YELLOW}$FILE_PATH${NC}..."
         mkdir -p "$(dirname "$FILE_PATH")"
-        if ! curl -sL "$URL" -o "$FILE_PATH"; then
+        if ! curl -sL "$URL?$(date +%s)" -o "$FILE_PATH"; then
              echo -e "${RED}错误: 下载 $FILE_PATH 失败，请检查网络。${NC}"
              # 如果下载失败且有备份，还原备份
              [ -f "${FILE_PATH}.bak" ] && mv "${FILE_PATH}.bak" "$FILE_PATH"
