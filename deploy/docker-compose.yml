@@ -2,7 +2,7 @@
 
 services:
   # 1. 业务网关 (Caddy v2)
-  # 负责 H3 宣告、自动化 TLS 以及静态伪装分流
+  # 负责 H3 宣告、自动化 TLS 以及内置静态伪装
   gateway:
     image: caddy:2-alpine
     container_name: aether-gateway
@@ -15,19 +15,11 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - ./certs:/certs:rw
+    # 初始化伪装页并启动 (Single Container 模式)
+    command: /bin/sh -c "mkdir -p /usr/share/caddy && echo '<h1>Aether-Realist</h1><p>System is running normally.</p>' > /usr/share/caddy/index.html && caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
 
     depends_on:
-      - decoy-site
       - aether-backend
-
-  # 2. 伪装站点 (Caddy Static)
-  decoy-site:
-    image: caddy:2-alpine
-    container_name: decoy-site
-    restart: always
-    network_mode: host
-    # 生成伪装页并启动 Caddy 文件服务 (监听 8081)，并推迟/禁用 admin 以免与网关冲突
-    command: /bin/sh -c "mkdir -p /usr/share/caddy && echo '<h1>Aether-Realist</h1><p>System is running normally.</p>' > /usr/share/caddy/index.html && caddy file_server --listen :8081 --root /usr/share/caddy --admin off"
 
   # 3. Aether 核心服务端 (Go)
   aether-backend:
