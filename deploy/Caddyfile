@@ -1,53 +1,15 @@
 {
-	# Aether-Realist Caddy Config (Protocol V5 Optimized)
-	# 全局配置：禁用 Caddy 内置 H3 协议以释放 UDP 端口 (由 Aether Backend 处理)
-	servers {
-		protocols h1 h2
-	}
+	# Aether-Realist Certificate Manager
+	# 仅负责向 Let's Encrypt 申请证书，不提供 Web 服务
+	admin off
 }
 
-# 动态监听地址 (由 deploy.sh 根据端口占用情况注入)
-# 模式 A: 80/443 可用 -> {$DOMAIN} (自动 HTTPS)
-# 模式 B: 端口被占 -> :$CADDY_PORT (配合 tls internal 或手动证书)
-{$CADDY_SITE_ADDRESS} {
-	# TLS 配置 (auto / internal / /certs/xxx.pem)
+# 仅用于证书申请的占位配置
+# 实际流量由 Aether Backend (Host模式) 直接接管
+{$DOMAIN} {
+	# 开启 TLS 并指定证书存储位置
 	tls {$TLS_CONFIG}
-	# 1. 基础安全头与 H3 宣告
-	header {
-		# 强制 HSTS (1年)
-		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-		# 防 MIME 嗅探
-		X-Content-Type-Options "nosniff"
-		# 宣告 H3 支持 (关键 - 动态端口)
-		Alt-Svc `h3=":{$CADDY_PORT}"; ma=2592000`
-		# 隐藏集成信息
-		-Server
-	}
-
-	# 2. 主动防御匹配器 (Active Probe Defense)
-	# 逻辑：匹配 API 路径，但如果不满足 (Upgrade: webtransport) 则视为非法探测
-	@bad_probe {
-		path /v1/api/*
-		not header Upgrade webtransport
-	}
-
-	# 处理非法探测：返回诱导性 401 错误
-	handle @bad_probe {
-		header Content-Type application/json
-		respond `{"code": 40101, "message": "Invalid Authentication Token"}` 401
-	}
-
-	# 3. Aether WebTransport 业务路由 (TCP 回落/探测)
-	# 逻辑：当用户通过 TCP 访问 /sync 时，返回 401，诱导探测者认为这是普通加密接口
-	handle /v1/api/sync {
-		header Content-Type application/json
-		respond `{"code": 40102, "message": "Authentication Required"}` 401
-	}
-
-	# 4. 默认回落 (内置伪装页)
-	# 逻辑：所有非业务请求直接由 Caddy 提供本地静态页面
-	handle {
-		root * /usr/share/caddy
-		file_server
-	}
+	
+	# 对任何请求仅返回简单的 200 OK，证明 ACME 挑战通过
+	respond "ACME Challenge Verification Endpoint" 200
 }
