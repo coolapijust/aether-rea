@@ -317,9 +317,44 @@ show_status() {
         
         # 自动检查时间同步
         check_time_sync
+
+        # 检查防火墙与 UDP 监听
+        check_firewall_and_udp
     else
         echo -e "${RED}未找到 docker-compose.yml 文件${NC}"
     fi
+}
+
+check_firewall_and_udp() {
+    echo -e "\n${YELLOW}--- 网络与防火墙检查 (QUIC/HTTP3) ---${NC}"
+    PORT=$(grep "^CADDY_PORT=" "deploy/.env" | cut -d'=' -f2 | tr -d ':')
+    PORT=${PORT:-8080}
+
+    # 1. 检查 UDP 监听
+    if command -v ss >/dev/null; then
+        if ss -uln | grep -q ":$PORT "; then
+            echo -e "${GREEN}[OK] UDP 端口 $PORT 监听正常 (用于 HTTP/3)${NC}"
+        else
+            echo -e "${RED}[ERR] 未检测到 UDP 端口 $PORT 监听！${NC}"
+        fi
+    elif command -v netstat >/dev/null; then
+        if netstat -uln | grep -q ":$PORT "; then
+            echo -e "${GREEN}[OK] UDP 端口 $PORT 监听正常 (用于 HTTP/3)${NC}"
+        else
+            echo -e "${RED}[ERR] 未检测到 UDP 端口 $PORT 监听！${NC}"
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 未找到 ss 或 netstat，跳过 UDP 监听检查。${NC}"
+    fi
+
+    # 2. 简易防火墙提示
+    if command -v ufw >/dev/null; then
+        if ufw status | grep -q "Status: active"; then
+            echo -e "${YELLOW}[WARN] UFW 防火墙已开启。请确保放行 UDP 端口：${NC}"
+            echo -e "      ${GREEN}sudo ufw allow $PORT/udp${NC}"
+        fi
+    fi
+    echo -e "${YELLOW}提示: 客户端无法连接通常是因为 UDP 端口被云厂商防火墙(安全组)拦截。${NC}"
 }
 
 check_time_sync() {
