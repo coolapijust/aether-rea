@@ -1,5 +1,6 @@
 # Aether-Realist Deployment Template (Protocol V5 Optimized)
 
+services:
   # 1. 业务网关 (Caddy v2) - 仅作为 ACME 证书申请工具
   # 不再监听 80/443，避免端口冲突与性能损耗
   gateway:
@@ -15,7 +16,6 @@
       - ./certs:/certs:rw
     # 仅申请证书，不启动 Server
     command: caddy trust
-
 
   # 2. Aether 核心服务端 (Host 直连模式 + 多态伪装挂载)
   aether-backend:
