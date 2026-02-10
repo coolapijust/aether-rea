@@ -176,33 +176,71 @@ install_service() {
     echo -e "${GREEN}服务启动成功！${NC}"
 }
 
-stop_service() {
-    echo -e "\n${YELLOW}正在暂停服务...${NC}"
+show_status() {
+    echo -e "\n${YELLOW}=== Aether-Realist 服务状态 ===${NC}"
     if [ -f "deploy/docker-compose.yml" ]; then
-        docker compose -f deploy/docker-compose.yml stop
-        echo -e "${GREEN}服务已暂停。${NC}"
+        docker compose -f deploy/docker-compose.yml ps
+        
+        echo -e "\n${YELLOW}--- 健康检查 (API 响应头) ---${NC}"
+        PSK=$(grep "^PSK=" "deploy/.env" | cut -d'=' -f2)
+        if curl -sI -H "X-Aether-PSK: $PSK" "http://localhost:8080/probe" | grep -q "200 OK"; then
+             echo -e "${GREEN}[OK] 网关探针响应正常 (Port 8080)${NC}"
+        elif curl -sI -H "X-Aether-PSK: $PSK" "http://localhost:80/probe" | grep -q "200 OK"; then
+             echo -e "${GREEN}[OK] 网关探针响应正常 (Port 80)${NC}"
+        else
+             echo -e "${RED}[WARN] 无法从本地回环确认 API 连通性，请检查 logs${NC}"
+        fi
     else
-        echo -e "${RED}未找到 deploy/docker-compose.yml，无法操作。${NC}"
+        echo -e "${RED}未找到部署文件。${NC}"
     fi
 }
 
-remove_service() {
-    echo -e "\n${RED}警告：此操作将删除所有容器和网络。${NC}"
-    read -p "确认删除服务吗? [y/N]: " CONFIRM
-    if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
-        if [ -f "deploy/docker-compose.yml" ]; then
-            docker compose -f deploy/docker-compose.yml down
-            echo -e "${GREEN}服务已移除。${NC}"
-            
-            read -p "是否同时清理未使用镜像 (docker image prune)? [y/N]: " PRUNE
-            if [[ "$PRUNE" =~ ^[Yy]$ ]]; then
-                docker image prune -f
-            fi
-        else
-            echo -e "${RED}未找到 deploy/docker-compose.yml。${NC}"
-        fi
+view_logs() {
+    echo -e "\n${YELLOW}请选择要查看日志的服务：${NC}"
+    echo "1) 网关 (Gateway/Caddy)"
+    echo "2) 后端 (Backend)"
+    echo "3) 所有日志"
+    read -p "请输入 [1-3]: " LOG_OPT
+    case $LOG_OPT in
+        1) docker compose -f deploy/docker-compose.yml logs -f --tail 100 gateway ;;
+        2) docker compose -f deploy/docker-compose.yml logs -f --tail 100 backend ;;
+        3) docker compose -f deploy/docker-compose.yml logs -f --tail 100 ;;
+        *) echo "无效指令" ;;
+    esac
+}
+
+check_bbr() {
+    echo -e "\n${YELLOW}=== 系统传输加速 (BBR) 检查 ===${NC}"
+    if lsmod | grep -q "bbr"; then
+        echo -e "${GREEN}[OK] BBR 已开启。${NC}"
     else
-        echo "操作取消。"
+        echo -e "${RED}[WARN] BBR 未开启。强烈建议在高丢包网络环境下开启。${NC}"
+        echo "开启指令参考:"
+        echo "echo \"net.core.default_qdisc=fq\" >> /etc/sysctl.conf"
+        echo "echo \"net.ipv4.tcp_congestion_control=bbr\" >> /etc/sysctl.conf"
+        echo "sysctl -p"
+    fi
+}
+
+quick_config() {
+    ENV_FILE="deploy/.env"
+    if [ ! -f "$ENV_FILE" ]; then echo "错误: .env 不存在"; return; fi
+    
+    echo -e "\n${YELLOW}=== 快捷参数修改 ===${NC}"
+    echo "1) 修改 PSK"
+    echo "2) 修改 域名 (DOMAIN)"
+    read -p "请输入 [1/2]: " CFG_OPT
+    if [ "$CFG_OPT" = "1" ]; then
+        read -p "新 PSK: " NEW_PSK
+        [ -n "$NEW_PSK" ] && sed -i "s/^PSK=.*/PSK=$NEW_PSK/" "$ENV_FILE"
+    elif [ "$CFG_OPT" = "2" ]; then
+        read -p "新域名: " NEW_DOM
+        [ -n "$NEW_DOM" ] && sed -i "s/^DOMAIN=.*/DOMAIN=$NEW_DOM/" "$ENV_FILE"
+    fi
+    echo -e "${GREEN}配置已更新。${NC}"
+    read -p "是否同步重启容器以应用配置? [y/N]: " RESTART_CONFIRM
+    if [[ "$RESTART_CONFIRM" =~ ^[Yy]$ ]]; then
+        docker compose -f deploy/docker-compose.yml up -d
     fi
 }
 
@@ -212,12 +250,22 @@ show_menu() {
     echo "1. 安装 / 更新服务"
     echo "2. 暂停服务"
     echo "3. 删除服务"
+    echo "-----------------"
+    echo "4. 查看实时运行状态"
+    echo "5. 查看各服务实时日志"
+    echo "6. 检查系统优化 (BBR)"
+    echo "7. 快捷修改关键配置"
+    echo "-----------------"
     echo "0. 退出"
-    read -p "请输入选项 [0-3]: " OPTION
+    read -p "请输入选项 [0-7]: " OPTION
     case $OPTION in
         1) install_service ;;
         2) stop_service ;;
         3) remove_service ;;
+        4) show_status ;;
+        5) view_logs ;;
+        6) check_bbr ;;
+        7) quick_config ;;
         0) exit 0 ;;
         *) echo -e "${RED}无效选项${NC}" ;;
     esac
