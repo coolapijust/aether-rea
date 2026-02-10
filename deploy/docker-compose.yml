@@ -27,6 +27,8 @@ services:
       - SSL_KEY_FILE=${KEY_FILE:-/certs/server.key}
       - DECOY_ROOT=/decoy
     volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
       - ./certs:/certs:ro
       - ${DECOY_PATH}:/decoy:ro
     cap_add:

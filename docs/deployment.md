@@ -97,6 +97,49 @@ acme.sh --install-cert -d your-domain.com \
 此方案下，Backend 实时读取磁盘证书，续签过程对业务完全透明。
 
 ---
+
+## 4. 容器时间同步故障排查
+
+容器时间与宿主机不同步会导致时间戳验证失败，影响连接建立。
+
+### 自动检测
+
+部署脚本会在启动后自动检查容器时间偏差：
+
+```bash
+./deploy.sh status
+```
+
+如果偏差超过 5 秒，会显示警告并提供修复建议。
+
+### 手动修复
+
+**方案 1：同步宿主机时间**
+```bash
+# 安装 ntpdate（如果未安装）
+sudo apt-get install ntpdate  # Debian/Ubuntu
+sudo yum install ntpdate       # CentOS/RHEL
+
+# 同步时间
+sudo ntpdate -u pool.ntp.org
+
+# 重启容器使时间生效
+docker restart aether-gateway-core
+```
+
+**方案 2：检查时区配置**
+```bash
+# 查看宿主机时区
+timedatectl
+
+# 查看容器时区
+docker exec aether-gateway-core date
+
+# 如果时区不一致，重新部署容器（会自动挂载宿主机时区）
+docker compose -f deploy/docker-compose.yml up -d --force-recreate
+```
+
+---
  
  ## 4. 性能调优 (Kernel Tuning)
  

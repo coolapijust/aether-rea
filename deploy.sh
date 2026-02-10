@@ -284,11 +284,42 @@ show_status() {
         if curl -ksI -H "X-Aether-PSK: $PSK" "https://localhost:${PORT:-8080}/probe" | grep -q "200 OK"; then
              echo -e "${GREEN}[OK] Aether Backend 响应正常 (Port ${PORT:-8080})${NC}"
         else
-             echo -e "${RED}[WARN] 无法从本地回环确认 API 连通性，请检查 logs${NC}"
-             echo -e "${YELLOW}提示: 如果您使用了非 443 端口，请确保防火墙已放行该端口。${NC}"
+             echo -e "${RED}[WARN] 无法从本地回环确认 API 连通性,请检查 logs${NC}"
+             echo -e "${YELLOW}提示: 如果您使用了非 443 端口,请确保防火墙已放行该端口。${NC}"
         fi
+        
+        # 自动检查时间同步
+        check_time_sync
     else
-        echo -e "${RED}未找到部署文件。${NC}"
+        echo -e "${RED}未找到 docker-compose.yml 文件${NC}"
+    fi
+}
+
+check_time_sync() {
+    echo -e "\n${YELLOW}--- 时间同步检查 ---${NC}"
+    
+    # 获取宿主机时间戳
+    HOST_TIME=$(date +%s)
+    
+    # 获取容器时间戳（如果容器未启动则跳过）
+    CONTAINER_TIME=$(docker exec aether-gateway-core date +%s 2>/dev/null || echo "0")
+    
+    if [ "$CONTAINER_TIME" = "0" ]; then
+        echo -e "${YELLOW}容器未启动或无法访问，跳过时间检查。${NC}"
+        return
+    fi
+    
+    # 计算时间偏差（绝对值）
+    TIME_DIFF=$((HOST_TIME - CONTAINER_TIME))
+    TIME_DIFF=${TIME_DIFF#-}  # 移除负号取绝对值
+    
+    if [ $TIME_DIFF -gt 5 ]; then
+        echo -e "${RED}[WARN] 容器时间偏差: ${TIME_DIFF}秒${NC}"
+        echo -e "${YELLOW}建议操作:${NC}"
+        echo -e "  1. 同步宿主机时间: ${GREEN}sudo ntpdate -u pool.ntp.org${NC}"
+        echo -e "  2. 重启容器: ${GREEN}docker restart aether-gateway-core${NC}"
+    else
+        echo -e "${GREEN}[OK] 容器时间同步正常 (偏差 ${TIME_DIFF}秒)${NC}"
     fi
 }
 
