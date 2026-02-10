@@ -306,9 +306,9 @@ show_status() {
         docker compose -f deploy/docker-compose.yml ps
         
         echo -e "\n${YELLOW}--- 健康检查 (API 响应头) ---${NC}"
-        PSK=$(grep "^PSK=" "deploy/.env" | cut -d'=' -f2)
+        # PSK=$(grep "^PSK=" "deploy/.env" | cut -d'=' -f2) # PSK 不再是 /health 必需的
         PORT=$(grep "^CADDY_PORT=" "deploy/.env" | cut -d'=' -f2 | tr -d ':')
-        if curl -ksI -H "X-Aether-PSK: $PSK" "https://localhost:${PORT:-8080}/probe" | grep -q "200 OK"; then
+        if curl -ksI "https://localhost:${PORT:-8080}/health" | grep -q "200 OK"; then
              echo -e "${GREEN}[OK] Aether Backend 响应正常 (Port ${PORT:-8080})${NC}"
         else
              echo -e "${RED}[WARN] 无法从本地回环确认 API 连通性,请检查 logs${NC}"
