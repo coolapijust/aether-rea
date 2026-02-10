@@ -91,7 +91,68 @@ install_service() {
         echo "DOMAIN=$DOMAIN" >> "$ENV_FILE"
     fi
 
-    # 4. 内核优化 (可选)
+    # 4. 智能端口检测与证书配置
+    echo -e "\n${YELLOW}[4/5] 检测端口与配置证书...${NC}"
+    check_port() {
+        if command -v netstat &> /dev/null; then
+            netstat -tulpn | grep -q ":$1 "
+        elif command -v ss &> /dev/null; then
+            ss -tulpn | grep -q ":$1 "
+        else
+            echo "0" # 无法检测，默认认为未占用或由 Caddy 自身报错
+            return 1
+        fi
+    }
+
+    CADDY_SITE_ADDRESS=""
+    TLS_CONFIG=""
+
+    if ! check_port 80 && ! check_port 443; then
+        echo -e "${GREEN}检测到 80/443 端口空闲，将启用自动 HTTPS (Let's Encrypt)。${NC}"
+        CADDY_SITE_ADDRESS="{$DOMAIN}"
+        TLS_CONFIG="internal" # 实际上 Caddy 会自动覆盖，但给个默认值
+    else
+        echo -e "${YELLOW}检测到 80/443 端口被占用。${NC}"
+        echo "请选择证书策略 (将运行在 8080 端口):"
+        echo "1) 我有自己的证书 (输入路径)"
+        echo "2) 自动生成自签名证书 (仅测试用)"
+        read -p "请输入选项 [1/2]: " CERT_OPTION
+
+        CADDY_SITE_ADDRESS=":8080"
+        
+        if [ "$CERT_OPTION" = "1" ]; then
+            read -p "请输入证书文件路径 (.crt/.pem): " CERT_PATH
+            read -p "请输入私钥文件路径 (.key): " KEY_PATH
+            if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+                mkdir -p deploy/certs
+                cp "$CERT_PATH" deploy/certs/manual.crt
+                cp "$KEY_PATH" deploy/certs/manual.key
+                TLS_CONFIG="/certs/manual.crt /certs/manual.key"
+            else
+                echo -e "${RED}错误：找不到证书文件，回退到自签名模式。${NC}"
+                CERT_OPTION="2"
+            fi
+        fi
+
+        if [ "$CERT_OPTION" != "1" ]; then
+            echo -e "${YELLOW}正在生成自签名证书...${NC}"
+            mkdir -p deploy/certs
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout deploy/certs/selfsigned.key \
+                -out deploy/certs/selfsigned.crt \
+                -subj "/CN=$DOMAIN" &> /dev/null
+            TLS_CONFIG="/certs/selfsigned.crt /certs/selfsigned.key"
+            echo -e "${GREEN}自签名证书已生成。${NC}"
+        fi
+    fi
+
+    # 写入环境变量文件 (覆盖旧的配置)
+    sed -i "/^CADDY_SITE_ADDRESS=/d" "$ENV_FILE"
+    sed -i "/^TLS_CONFIG=/d" "$ENV_FILE"
+    echo "CADDY_SITE_ADDRESS=$CADDY_SITE_ADDRESS" >> "$ENV_FILE"
+    echo "TLS_CONFIG=$TLS_CONFIG" >> "$ENV_FILE"
+
+    # 4.5 内核优化 (可选)
     echo -e "\n${YELLOW}[4/4] 检查内核参数优化 (UDP 缓存)...${NC}"
     RMEM_MAX=$(sysctl -n net.core.rmem_max 2>/dev/null || echo 0)
     if [ "$RMEM_MAX" -lt 16777216 ]; then
