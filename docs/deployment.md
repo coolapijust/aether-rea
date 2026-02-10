@@ -23,29 +23,14 @@ curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/depl
 
 Aether-Realist 提供了高性能的 Docker 镜像，内置 HTTP/3 WebTransport 支持与内存优化机制。V5 版本引入了更强的抗重放机制与 Session 自动轮换。
 
-### 生产推荐：Docker Compose 编排
+### 生产推荐：Docker Compose 编排 (KISS 架构)
 
-建议采用以下编排方案，它集成了自动化 TLS 获取、伪装站点以及主动探测防御。
+V5 版本推荐直接面向网络，移除冗余的代理层以获得极致性能。
 
 ```yaml
-version: '3.8'
-
 services:
-  # 1. 证书管理器 (Caddy) - 仅申请证书，已移除转发损耗
-  aether-cert-manager:
-    image: caddy:2-alpine
-    container_name: aether-cert-manager
-    restart: "no"
-    environment:
-      - DOMAIN=${DOMAIN}
-      - TLS_CONFIG=${TLS_CONFIG}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - ./certs:/certs:rw
-    command: caddy trust
-
-  # 2. 核心服务端 (Host 直连 + 多态伪装)
+  # 核心服务端 (Host 直连 + 多态伪装)
+  # 自动处理 443/8080 端口与 TLS 握手
   aether-gateway-core:
     image: ghcr.io/coolapijust/aether-realist:main
     container_name: aether-gateway-core
@@ -53,7 +38,7 @@ services:
     network_mode: host
     environment:
       - PSK=${PSK}
-      - LISTEN_ADDR=${CADDY_PORT} # 443/8080 自适应
+      - LISTEN_ADDR=:${CADDY_PORT} # 自动探测的端口
       - SSL_CERT_FILE=/certs/server.crt
       - SSL_KEY_FILE=/certs/server.key
       - DECOY_ROOT=/decoy
@@ -84,27 +69,32 @@ V5 引入了密钥生命周期管理。当单个 WebTransport 会话写入记录
 
 ---
 
-## 3. 自动化 TLS 证书管理 (Caddy)
+---
 
-为了确保传输链路的极致安全，建议使用 Caddy 作为证书管理后端。
+## 3. 自动化 TLS 证书管理 (外部协作)
 
-### 方案：极简 ACME 模式
+为了确保传输链路的极致安全与高性能，建议在宿主机使用专门的 ACME 工具管理证书。
 
-Caddy 不再作为反向代理，而是降级为纯粹的证书管理工具。
+### 方案：配合 acme.sh
 
-**Caddyfile 配置示例:**
-```caddy
-{
-    admin off
-}
+Backend 支持通过 `SIGHUP` 信号热重载证书。您可以配置 `acme.sh` 在更新证书后通知容器。
 
-your-domain.com {
-    tls your-email@example.com
-    respond "ACME Challenge Verification Endpoint" 200
-}
+**自动化流程:**
+1. **申请证书**:
+```bash
+acme.sh --issue -d your-domain.com --standalone
 ```
 
-此配置下，Caddy 仅在启动时运行一次以申请/更新证书，随后 Aether Backend 将直接读取证书文件并独占 443 端口，实现 **零转发损耗** 与 **0-RTT** 极速传输。
+2. **自动同步与重载**:
+将以下命令加入您的 `acme.sh` 安装指令中：
+```bash
+acme.sh --install-cert -d your-domain.com \
+    --cert-file      ./deploy/certs/server.crt \
+    --key-file       ./deploy/certs/server.key \
+    --reloadcmd      "docker kill -s HUP aether-gateway-core"
+```
+
+此方案下，Backend 实时读取磁盘证书，续签过程对业务完全透明。
 
 ---
  

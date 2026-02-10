@@ -60,6 +60,7 @@ var (
 	keyFile    = flag.String("key", "key.pem", "TLS key file")
 	psk        = flag.String("psk", "", "Pre-shared key")
 	secretPath = flag.String("path", "/v1/api/sync", "Secret path for WebTransport")
+	decoyRoot  = flag.String("decoy", "", "Path to the decoy/masquerade static website root")
 )
 
 func main() {
@@ -96,6 +97,9 @@ func main() {
 	if envKey := os.Getenv("SSL_KEY_FILE"); envKey != "" {
 		*keyFile = envKey
 	}
+	if envDecoy := os.Getenv("DECOY_ROOT"); envDecoy != "" {
+		*decoyRoot = envDecoy
+	}
 
 	if *psk == "" {
 		log.Println("ERROR: PSK is required. Please set -psk flag or PSK environment variable.")
@@ -108,26 +112,14 @@ func main() {
 	// Initialize Certificate Loader for hot-reloading
 	certLoader, err := NewCertificateLoader(*certFile, *keyFile)
 	if err != nil {
-		// Fallback to self-signed if loading failed (only if files are missing/invalid at startup)
-		if *certFile == "" && *keyFile == "" {
-			log.Printf("No TLS certificates provided. Generating self-signed certificate...")
-			certs, err := generateSelfSignedCert(domainEnv)
-			if err != nil {
-				log.Fatalf("Failed to generate self-signed cert: %v", err)
-			}
-			// Create a dummy loader with static cert
-			certLoader = &CertificateLoader{cert: &certs}
-		} else {
-			// If user provided files but they failed to load, we should probably warn and fallback or exit
-			// But for now let's just log error and maybe generate self-signed?
-			// Actually better to fail if files were specified but invalid
-			log.Printf("Warning: Failed to load specified certificates: %v. Generating temporary self-signed...", err)
-			certs, err := generateSelfSignedCert(domainEnv)
-			if err != nil {
-				log.Fatalf("Failed to generate self-signed cert: %v", err)
-			}
-			certLoader = &CertificateLoader{cert: &certs, certFile: *certFile, keyFile: *keyFile}
+		// Fallback to self-signed if loading failed
+		// V5: We always generate a 10-year self-signed cert if the provided path is missing
+		log.Printf("TLS certificates not found or invalid (%v). Generating 10-year self-signed certificate...", err)
+		certs, err := generateSelfSignedCert(domainEnv)
+		if err != nil {
+			log.Fatalf("Failed to generate self-signed cert: %v", err)
 		}
+		certLoader = &CertificateLoader{cert: &certs, certFile: *certFile, keyFile: *keyFile}
 	} else {
 		log.Printf("TLS certificates loaded successfully from %s", *certFile)
 	}
@@ -199,6 +191,16 @@ func main() {
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// If decoyRoot is specified and index.html exists, serve static files
+		if *decoyRoot != "" {
+			index := fmt.Sprintf("%s/index.html", strings.TrimSuffix(*decoyRoot, "/"))
+			if _, err := os.Stat(index); err == nil {
+				http.FileServer(http.Dir(*decoyRoot)).ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// Fallback to simple built-in decoy
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(`<!DOCTYPE html>
 <html>
@@ -483,7 +485,7 @@ func generateSelfSignedCert(domain string) (tls.Certificate, error) {
 		SerialNumber: big.NewInt(1),
 		Subject:      subject,
 		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(time.Hour * 24 * 365),
+		NotAfter:     time.Now().Add(time.Hour * 24 * 365 * 10), // V5: 10 Years Validity
 
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},

@@ -1,5 +1,6 @@
 services:
   # 1. 证书管理器 (Caddy) - 仅作为 ACME 证书申请工具
+  # 独立运行，通过 80 端口完成 HTTP 挑战并更新 ./certs 中的文件
   gateway:
     image: caddy:2-alpine
     container_name: aether-cert-manager
@@ -21,9 +22,9 @@ services:
     network_mode: host
     environment:
       - PSK=${PSK}
-      - LISTEN_ADDR=:${CADDY_PORT}  # 补全冒号修复监听错误
-      - SSL_CERT_FILE=${CERT_FILE:-/certs/server.crt} # 动态路径
-      - SSL_KEY_FILE=${KEY_FILE:-/certs/server.key}   # 动态路径
+      - LISTEN_ADDR=:${CADDY_PORT}
+      - SSL_CERT_FILE=${CERT_FILE:-/certs/server.crt}
+      - SSL_KEY_FILE=${KEY_FILE:-/certs/server.key}
       - DECOY_ROOT=/decoy
     volumes:
       - ./certs:/certs:ro
