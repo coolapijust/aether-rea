@@ -1,7 +1,6 @@
 {
 	# Aether-Realist Certificate Manager
 	# 仅负责向 Let's Encrypt 申请证书，不提供 Web 服务
-	admin off
 }
 
 # 仅用于证书申请的占位配置
