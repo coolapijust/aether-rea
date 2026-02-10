@@ -9,7 +9,7 @@
 直接运行以下命令，脚本将自动下载依赖并完成配置：
 
 ```bash
-bash <(curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/deploy.sh?$(date +%s)")
+curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/deploy.sh?$(date +%s)" -o deploy.sh && chmod +x deploy.sh && ./deploy.sh
 ```
 
 > [!TIP]

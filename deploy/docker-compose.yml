@@ -26,8 +26,8 @@ services:
     container_name: decoy-site
     restart: always
     network_mode: host
-    # 生成伪装页并启动 Caddy 文件服务 (监听 8081)
-    command: /bin/sh -c "mkdir -p /usr/share/caddy && echo '<h1>Aether-Realist</h1><p>System is running normally.</p>' > /usr/share/caddy/index.html && caddy file_server --listen :8081 --root /usr/share/caddy"
+    # 生成伪装页并启动 Caddy 文件服务 (监听 8081)，并推迟/禁用 admin 以免与网关冲突
+    command: /bin/sh -c "mkdir -p /usr/share/caddy && echo '<h1>Aether-Realist</h1><p>System is running normally.</p>' > /usr/share/caddy/index.html && caddy file_server --listen :8081 --root /usr/share/caddy --admin off"
 
   # 3. Aether 核心服务端 (Go)
   aether-backend:
