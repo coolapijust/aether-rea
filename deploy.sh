@@ -141,7 +141,7 @@ remove_service() {
 
 # 菜单逻辑
 show_menu() {
-    echo -e "\n${green}请选择操作：${NC}"
+    echo -e "\n${GREEN}请选择操作：${NC}"
     echo "1. 安装 / 更新服务"
     echo "2. 暂停服务"
     echo "3. 删除服务"
