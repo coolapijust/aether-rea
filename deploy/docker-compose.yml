@@ -3,7 +3,8 @@ services:
   gateway:
     image: caddy:2-alpine
     container_name: aether-cert-manager
-    restart: "no"
+    restart: always
+    network_mode: host
     environment:
       - DOMAIN=${DOMAIN}
       - TLS_CONFIG=${TLS_CONFIG}
@@ -11,7 +12,6 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - ./certs:/certs:rw
-    command: caddy trust
 
   # 2. Aether 核心服务端 (Host 直连模式 + 多态伪装挂载)
   aether-backend:
