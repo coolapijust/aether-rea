@@ -1,20 +1,6 @@
 services:
-  # 1. 证书管理器 (Caddy) - 仅作为 ACME 证书申请工具
-  # 独立运行，通过 80 端口完成 HTTP 挑战并更新 ./certs 中的文件
-  gateway:
-    image: caddy:2-alpine
-    container_name: aether-cert-manager
-    restart: always
-    network_mode: host
-    environment:
-      - DOMAIN=${DOMAIN}
-      - TLS_CONFIG=${TLS_CONFIG}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - ./certs:/certs:rw
-
-  # 2. Aether 核心服务端 (Host 直连模式 + 多态伪装挂载)
+  # Aether 核心服务端 (Host 直连模式 + 多态伪装挂载)
+  # 彻底移除 Caddy 代理层，由 Backend 直接处理 TLS 和 443 端口
   aether-backend:
     image: ghcr.io/coolapijust/aether-realist:main
     container_name: aether-gateway-core
@@ -33,6 +19,3 @@ services:
       - ${DECOY_PATH}:/decoy:ro
     cap_add:
       - NET_ADMIN
-
-volumes:
-  caddy_data:
