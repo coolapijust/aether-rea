@@ -1,43 +1,40 @@
 # Aether-Realist Deployment Template (Protocol V5 Optimized)
 
-services:
-  # 1. 业务网关 (Caddy v2)
-  # 负责 H3 宣告、自动化 TLS 以及内置静态伪装
+  # 1. 业务网关 (Caddy v2) - 仅作为 ACME 证书申请工具
+  # 不再监听 80/443，避免端口冲突与性能损耗
   gateway:
     image: caddy:2-alpine
-    container_name: aether-gateway
-    restart: always
-    network_mode: host 
+    container_name: aether-cert-manager
+    restart: "no" # 只运行一次用于申请证书
     environment:
       - DOMAIN=${DOMAIN}
-      - CADDY_SITE_ADDRESS=${CADDY_SITE_ADDRESS}
-      - CADDY_PORT=${CADDY_PORT}
       - TLS_CONFIG=${TLS_CONFIG}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
-      - caddy_config:/config
       - ./certs:/certs:rw
-    # 初始化伪装页并启动 (Single Container 模式)
-    command: /bin/sh -c "mkdir -p /usr/share/caddy && echo '<h1>Aether-Realist</h1><p>System is running normally.</p>' > /usr/share/caddy/index.html && caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
+    # 仅申请证书，不启动 Server
+    command: caddy trust
 
-    depends_on:
-      - aether-backend
 
-  # 3. Aether 核心服务端 (Go)
+  # 2. Aether 核心服务端 (Host 直连模式 + 多态伪装挂载)
   aether-backend:
     image: ghcr.io/coolapijust/aether-realist:main
-    container_name: aether-gateway-backend
+    container_name: aether-gateway-core
     restart: always
     network_mode: host
     environment:
       - PSK=${PSK}
-      - LISTEN_ADDR=:8090 
-      - SSL_CERT_FILE=/certs/fullchain.pem
-      - SSL_KEY_FILE=/certs/privkey.pem
+      - LISTEN_ADDR=${CADDY_PORT}  # 使用脚本决策的端口 (443/8080/Customize)
+      - SSL_CERT_FILE=/certs/server.crt
+      - SSL_KEY_FILE=/certs/server.key
+      - DECOY_ROOT=/decoy        # 指向容器内挂载点
     volumes:
-        - ./certs:/certs:ro
+      - ./certs:/certs:ro
+      - ${DECOY_PATH}:/decoy:ro  # 动态挂载伪装目录
+    cap_add:
+      - NET_ADMIN                # 允许内核调优 (BBR)
 
 volumes:
   caddy_data:
-  caddy_config:
+
