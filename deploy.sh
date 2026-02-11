@@ -108,6 +108,7 @@ install_service() {
     # 获取当前配置
     CURRENT_PSK=$(grep "^PSK=" "$ENV_FILE" | cut -d'=' -f2)
     CURRENT_DOMAIN=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d'=' -f2)
+    CURRENT_CADDY_PORT=$(grep "^CADDY_PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
 
     # 过滤默认占位符 (防止 .env.example 的值被误用)
     if [ "$CURRENT_PSK" = "your_super_secret_token" ]; then
@@ -161,27 +162,36 @@ install_service() {
     CADDY_SITE_ADDRESS=""
     TLS_CONFIG=""
 
-    if ! check_port 443; then
-        echo -e "${GREEN}检测到 443 端口空闲，将使用标准 HTTPS 端口。${NC}"
-        CADDY_PORT="443"
-    else
-        echo -e "${YELLOW}检测到 80/443 端口被占用。${NC}"
-        
-        # 默认回落端口
-        DEFAULT_PORT=8080
-        if check_port $DEFAULT_PORT; then
-            echo -e "${RED}警告: 默认回落端口 $DEFAULT_PORT 也被占用！${NC}"
-            read -p "请输入一个新的可用端口 (例如 8443): " CUSTOM_PORT
-            CADDY_PORT=${CUSTOM_PORT:-$DEFAULT_PORT}
-            while check_port $CADDY_PORT; do
-                read -p "${RED}端口 $CADDY_PORT 仍被占用，请重新输入: ${NC}" CADDY_PORT
-            done
-        else
-            CADDY_PORT=$DEFAULT_PORT
+    # 若已安装过服务，更新时优先沿用已有端口，避免把“自身监听”误判为冲突
+    if [[ "$CURRENT_CADDY_PORT" =~ ^[0-9]+$ ]] && [ "$CURRENT_CADDY_PORT" -ge 1 ] && [ "$CURRENT_CADDY_PORT" -le 65535 ]; then
+        CADDY_PORT="$CURRENT_CADDY_PORT"
+        echo -e "${GREEN}检测到现有端口配置 CADDY_PORT=$CADDY_PORT，更新将沿用该端口。${NC}"
+        if [ "$CADDY_PORT" != "443" ]; then
+            CADDY_SITE_ADDRESS=":$CADDY_PORT"
         fi
+    else
+        if ! check_port 443; then
+            echo -e "${GREEN}检测到 443 端口空闲，将使用标准 HTTPS 端口。${NC}"
+            CADDY_PORT="443"
+        else
+            echo -e "${YELLOW}检测到 80/443 端口被占用。${NC}"
+            
+            # 默认回落端口
+            DEFAULT_PORT=8080
+            if check_port $DEFAULT_PORT; then
+                echo -e "${RED}警告: 默认回落端口 $DEFAULT_PORT 也被占用！${NC}"
+                read -p "请输入一个新的可用端口 (例如 8443): " CUSTOM_PORT
+                CADDY_PORT=${CUSTOM_PORT:-$DEFAULT_PORT}
+                while check_port $CADDY_PORT; do
+                    read -p "${RED}端口 $CADDY_PORT 仍被占用，请重新输入: ${NC}" CADDY_PORT
+                done
+            else
+                CADDY_PORT=$DEFAULT_PORT
+            fi
 
-        echo -e "${GREEN}将使用端口: $CADDY_PORT${NC}"
-        CADDY_SITE_ADDRESS=":$CADDY_PORT"
+            echo -e "${GREEN}将使用端口: $CADDY_PORT${NC}"
+            CADDY_SITE_ADDRESS=":$CADDY_PORT"
+        fi
     fi
 
     # 4. 多态伪装站点配置 (迁移至独立目录)
@@ -352,6 +362,15 @@ EOF
     # 智能端口占用解决 (针对优雅更新的补充)
     resolve_port_conflict() {
         local TARGET_PORT=$1
+        # host 网络模式更新时，先停掉旧核心容器，避免同端口抢占失败
+        if docker ps -a --format '{{.Names}}' | grep -qx "aether-gateway-core"; then
+            if docker ps --format '{{.Names}}' | grep -qx "aether-gateway-core"; then
+                echo -e "${YELLOW}检测到旧核心容器正在运行，先执行平滑下线以释放端口...${NC}"
+                docker stop aether-gateway-core >/dev/null 2>&1 || true
+            fi
+            docker rm aether-gateway-core >/dev/null 2>&1 || true
+        fi
+
         if check_port "$TARGET_PORT"; then
             echo -e "${YELLOW}检测到端口 $TARGET_PORT 被占用。正在分析进程...${NC}"
             local PID_INFO=$(lsof -i :$TARGET_PORT -t 2>/dev/null || fuser $TARGET_PORT/tcp 2>/dev/null | awk '{print $NF}')
