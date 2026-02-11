@@ -83,8 +83,13 @@ install_service() {
         AUTO_PSK=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
         read -p "请输入预共享密钥 PSK (默认随机生成: $AUTO_PSK): " PSK
         PSK=${PSK:-$AUTO_PSK}
+        
+        # 安全转义: 将所有单引号替换为 '\'' (结束当前引号，转义单引号，重新开始引号)
+        # 这样 abc'123 就会变成 abc'\''123，配合外层单引号包裹，最终在 .env 中变成 'abc'\''123'
+        SAFE_PSK=$(echo "$PSK" | sed "s/'/'\\\\''/g")
+        
         sed -i "/^PSK=/d" "$ENV_FILE"
-        echo "PSK=$PSK" >> "$ENV_FILE"
+        echo "PSK='$SAFE_PSK'" >> "$ENV_FILE"
     fi
 
     # 交互输入 DOMAIN
@@ -94,8 +99,11 @@ install_service() {
             echo -e "${RED}错误: 域名不能为空。${NC}"
             return 1
         fi
+        
+        SAFE_DOMAIN=$(echo "$DOMAIN" | sed "s/'/'\\\\''/g")
+        
         sed -i "/^DOMAIN=/d" "$ENV_FILE"
-        echo "DOMAIN=$DOMAIN" >> "$ENV_FILE"
+        echo "DOMAIN='$SAFE_DOMAIN'" >> "$ENV_FILE"
     fi
 
     # 4. 智能端口检测与证书配置
