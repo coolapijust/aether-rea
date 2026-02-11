@@ -173,11 +173,12 @@ func main() {
 		maxConnWin = 4 * 1024 * 1024
 	case "aggressive":
 		// Aggressive: Faster ramp-up for high-latency links.
-		// Stream window locked to 4MB max as per safety requirements.
+		// Keep aggressive profile aligned with GUI core defaults to avoid
+		// receiver-side bottlenecks after quic-go upgrades.
 		streamWin = 4 * 1024 * 1024
-		connWin = 6 * 1024 * 1024
-		maxStreamWin = 4 * 1024 * 1024
-		maxConnWin = 12 * 1024 * 1024
+		connWin = 8 * 1024 * 1024
+		maxStreamWin = 32 * 1024 * 1024
+		maxConnWin = 48 * 1024 * 1024
 	default:
 		profile = "normal"
 		// Normal: Balanced profile for general use.
@@ -466,15 +467,26 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 		for {
 			n, err := conn.Read(buf)
 			if n > 0 {
-				// V5: Encrypt/Wrap in Data Record with NonceGenerator
-				recordBytes, err := core.BuildDataRecord(buf[:n], meta.Options.MaxPadding, ng)
-				if err != nil {
-					errCh <- err
-					return
-				}
-				if _, wErr := stream.Write(recordBytes); wErr != nil {
-					errCh <- wErr
-					return
+				// Chunk payload to protocol-sized records to reduce HoL blocking.
+				remaining := buf[:n]
+				for len(remaining) > 0 {
+					chunkSize := len(remaining)
+					if chunkSize > core.MaxRecordPayload {
+						chunkSize = core.MaxRecordPayload
+					}
+					chunk := remaining[:chunkSize]
+					recordBytes, buildErr := core.BuildDataRecord(chunk, meta.Options.MaxPadding, ng)
+					if buildErr != nil {
+						errCh <- buildErr
+						return
+					}
+					if _, wErr := stream.Write(recordBytes); wErr != nil {
+						core.PutBuffer(recordBytes)
+						errCh <- wErr
+						return
+					}
+					core.PutBuffer(recordBytes)
+					remaining = remaining[chunkSize:]
 				}
 			}
 			if err != nil {
