@@ -74,7 +74,7 @@ func (r *RecordReader) ReadNextRecord() (*Record, error) {
 	// V5.1 Optimization: Use pool for receiving records
 	var recordBytes []byte
 	isPooled := false
-	if totalLength <= PoolBufferSize {
+	if int(totalLength) <= PoolBufferSize {
 		recordBytes = GetBuffer()
 		recordBytes = recordBytes[:totalLength]
 		isPooled = true
