@@ -264,7 +264,29 @@ func main() {
 	// 1. Start HTTP/3 (UDP) Server for WebTransport
 	go func() {
 		log.Printf("Starting HTTP/3 (UDP) server on %s", *listenAddr)
-		if err := server.ListenAndServe(); err != nil {
+		
+		udpAddr, err := net.ResolveUDPAddr("udp", *listenAddr)
+		if err != nil {
+			log.Fatalf("Failed to resolve UDP addr: %v", err)
+		}
+		
+		conn, err := net.ListenUDP("udp", udpAddr)
+		if err != nil {
+			log.Fatalf("Failed to listen UDP: %v", err)
+		}
+		
+		// V5.1 Performance Fix: Increase UDP buffers to 32MB to absorb ISP bursts
+		// This prevents kernel-level packet drops during token bucket refills
+		const bufSize = 32 * 1024 * 1024 // 32MB
+		if err := conn.SetReadBuffer(bufSize); err != nil {
+			log.Printf("Warning: Failed to set UDP read buffer: %v", err)
+		}
+		if err := conn.SetWriteBuffer(bufSize); err != nil {
+			log.Printf("Warning: Failed to set UDP write buffer: %v", err)
+		}
+		log.Printf("UDP Send/Recv buffers set to %d bytes", bufSize)
+
+		if err := server.Serve(conn); err != nil {
 			log.Fatalf("HTTP/3 server failed: %v", err)
 		}
 	}()

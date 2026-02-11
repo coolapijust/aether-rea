@@ -109,15 +109,54 @@ func (sm *sessionManager) initialize() error {
 		InitialConnectionReceiveWindow: connWin,
 		MaxStreamReceiveWindow:         maxStreamWin,
 		MaxConnectionReceiveWindow:     maxConnWin,
+		MaxConnectionReceiveWindow:     maxConnWin,
 	}
 
-	sm.dialer = &webtransport.Dialer{
+	// V5.1 Performance Fix: Create a dedicated UDP socket with massive buffers
+	// This ensures the client can absorb 16KB high-frequency bursts from the server
+	// without kernel-level drops, which is critical for 8Mbps+ throughput.
+	udpAddr, err := net.ResolveUDPAddr("udp", ":0")
+	if err != nil {
+		return fmt.Errorf("failed to resolve local udp: %w", err)
+	}
+	udpConn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return fmt.Errorf("failed to bind local udp: %w", err)
+	}
+	
+	const bufSize = 32 * 1024 * 1024 // 32MB Read Buffer
+	if err := udpConn.SetReadBuffer(bufSize); err != nil {
+		log.Printf("Warning: Failed to set client UDP read buffer: %v", err)
+	}
+	if err := udpConn.SetWriteBuffer(bufSize); err != nil {
+		log.Printf("Warning: Failed to set client UDP write buffer: %v", err)
+	}
+
+	// Create a transport that uses this optimized connection
+	tr := &quic.Transport{
+		Conn: udpConn,
+	}
+	
+	// Inject the transport via http3.RoundTripper
+	roundTripper := &http3.RoundTripper{
 		TLSClientConfig: &tls.Config{
 			ServerName:         parsed.Hostname(),
 			NextProtos:         []string{http3.NextProtoH3},
 			InsecureSkipVerify: sm.config.AllowInsecure,
 		},
 		QUICConfig: quicConfig,
+		Dial: func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+			// Resolve the target address manually to ensure we dial correctly
+			udpAddr, err := net.ResolveUDPAddr("udp", addr)
+			if err != nil {
+				return nil, err
+			}
+			return tr.DialEarly(ctx, udpAddr, tlsCfg, cfg)
+		},
+	}
+
+	sm.dialer = &webtransport.Dialer{
+		RoundTripper: roundTripper,
 	}
 
 	if sm.config.AllowInsecure {
