@@ -29,8 +29,8 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	"github.com/quic-go/quic-go/logging"
 	"github.com/quic-go/quic-go/qlog"
+	"github.com/quic-go/quic-go/qlogwriter"
 	"github.com/quic-go/webtransport-go"
 )
 
@@ -134,18 +134,29 @@ func main() {
 		MinVersion:     tls.VersionTLS13,                    // Enforce TLS 1.3 for security
 	}
 
-	var tracer func(context.Context, logging.Perspective, quic.ConnectionID) *logging.ConnectionTracer
+	var tracer func(context.Context, bool, quic.ConnectionID) qlogwriter.Trace
 	if os.Getenv("QLOG") == "1" {
 		log.Println("Config: QLOG tracing enabled")
-		tracer = func(ctx context.Context, p logging.Perspective, connID quic.ConnectionID) *logging.ConnectionTracer {
-			filename := fmt.Sprintf("server_%x.qlog", connID)
+		tracer = func(ctx context.Context, isClient bool, connID quic.ConnectionID) qlogwriter.Trace {
+			perspective := "server"
+			if isClient {
+				perspective = "client"
+			}
+			filename := fmt.Sprintf("%s_%x.qlog", perspective, connID)
 			f, err := os.Create(filename)
 			if err != nil {
 				log.Printf("Failed to create qlog file: %v", err)
 				return nil
 			}
 			log.Printf("Writing qlog to %s", filename)
-			return qlog.NewConnectionTracer(NewBufferedWriteCloser(bufio.NewWriter(f), f), p, connID)
+			fileSeq := qlogwriter.NewConnectionFileSeq(
+				NewBufferedWriteCloser(bufio.NewWriter(f), f),
+				isClient,
+				connID,
+				[]string{qlog.EventSchema},
+			)
+			go fileSeq.Run()
+			return fileSeq
 		}
 	}
 
@@ -165,7 +176,7 @@ func main() {
 		connWin = 6 * 1024 * 1024
 		maxStreamWin = 4 * 1024 * 1024
 		maxConnWin = 12 * 1024 * 1024
-	default: 
+	default:
 		profile = "normal"
 		// Normal: Balanced profile for general use.
 		streamWin = 2 * 1024 * 1024
@@ -264,17 +275,17 @@ func main() {
 	// 1. Start HTTP/3 (UDP) Server for WebTransport
 	go func() {
 		log.Printf("Starting HTTP/3 (UDP) server on %s", *listenAddr)
-		
+
 		udpAddr, err := net.ResolveUDPAddr("udp", *listenAddr)
 		if err != nil {
 			log.Fatalf("Failed to resolve UDP addr: %v", err)
 		}
-		
+
 		conn, err := net.ListenUDP("udp", udpAddr)
 		if err != nil {
 			log.Fatalf("Failed to listen UDP: %v", err)
 		}
-		
+
 		// V5.1 Performance Fix: Increase UDP buffers to 32MB to absorb ISP bursts
 		// This prevents kernel-level packet drops during token bucket refills
 		const bufSize = 32 * 1024 * 1024 // 32MB
