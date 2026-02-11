@@ -211,6 +211,9 @@ func main() {
 		},
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
+	// Ensure HTTP/3 SETTINGS always advertise WebTransport capabilities.
+	// This is required for clients that validate SETTINGS before sending CONNECT.
+	webtransport.ConfigureHTTP3Server(server.H3)
 	log.Printf("WebTransport capability: H3 datagrams enabled=%v, QUIC datagrams enabled=%v", server.H3.EnableDatagrams, quicConfig.EnableDatagrams)
 	// V5: ReplayCache removed - using counter-based anti-replay
 
