@@ -210,7 +210,18 @@ install_service() {
             local TEMPLATE_URL="$1"
             local DEST_DIR="deploy/decoy"
             
+            # [优化] 检测已有站点，支持更新时跳过
+            if [ -f "$DEST_DIR/index.html" ]; then
+                echo -e "${YELLOW}检测到已有伪装站点 (deploy/decoy)。${NC}"
+                read -p "是否覆盖现有伪装站点? [y/N]: " OVERWRITE_DECOY
+                if [[ ! "$OVERWRITE_DECOY" =~ ^[Yy]$ ]]; then
+                    echo -e "${GREEN}已跳过伪装站点部署，保留现有文件。${NC}"
+                    return 0
+                fi
+            fi
+
             echo -e "${YELLOW}正在部署伪装站点...${NC}"
+
             rm -rf "$DEST_DIR" && mkdir -p "$DEST_DIR"
             
             if [ -n "$TEMPLATE_URL" ]; then
@@ -309,7 +320,7 @@ EOF
     echo "CADDY_SITE_ADDRESS=$CADDY_SITE_ADDRESS" >> "$ENV_FILE"
     echo "CADDY_PORT=${CADDY_PORT:-8080}" >> "$ENV_FILE"
     echo "TLS_CONFIG=$TLS_CONFIG" >> "$ENV_FILE"
-    echo "DECOY_PATH=${DECOY_PATH:-./decoy}" >> "$ENV_FILE"
+    echo "DECOY_PATH=${DECOY_PATH:-deploy/decoy}" >> "$ENV_FILE"
     
     # 路径对齐：确保后端能找到证书
     sed -i "/^CERT_FILE=/d" "$ENV_FILE"
@@ -455,8 +466,12 @@ check_firewall_and_udp() {
     # 2. 简易防火墙提示
     if command -v ufw >/dev/null; then
         if ufw status | grep -q "Status: active"; then
-            echo -e "${YELLOW}[WARN] UFW 防火墙已开启。请确保放行 UDP 端口：${NC}"
-            echo -e "      ${GREEN}sudo ufw allow $PORT/udp${NC}"
+            echo -e "${YELLOW}[WARN] UFW 防火墙已开启。请确保放行以下端口：${NC}"
+            echo -e "      UDP: ${GREEN}sudo ufw allow $PORT/udp${NC} (WebTransport 核心)"
+            echo -e "      TCP: ${GREEN}sudo ufw allow $PORT/tcp${NC} (HTTPS 访问)"
+            if [ "$PORT" = "443" ]; then
+                echo -e "      TCP: ${GREEN}sudo ufw allow 80/tcp${NC} (HTTP 自动跳转)"
+            fi
         fi
     fi
     echo -e "${YELLOW}提示: 客户端无法连接通常是因为 UDP 端口被云厂商防火墙(安全组)拦截。${NC}"

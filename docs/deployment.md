@@ -45,7 +45,7 @@ services:
       - WINDOW_PROFILE=normal # 可选: conservative, normal, aggressive
     volumes:
       - ./certs:/certs:ro
-      - ${DECOY_PATH}:/decoy:ro # 动态挂载伪装目录
+      - ${DECOY_PATH:-deploy/decoy}:/decoy:ro # 动态挂载伪装目录 (默认为 deploy/decoy)
     cap_add:
       - NET_ADMIN
 ```
@@ -158,9 +158,11 @@ docker compose -f deploy/docker-compose.yml up -d --force-recreate
 --- 网络与防火墙检查 (QUIC/HTTP3) ---
 [OK] UDP 端口 443 监听正常
 [WARN] UFW 防火墙已开启。请确保放行 UDP 端口：
-      sudo ufw allow 443/udp
+      sudo ufw allow 443/udp (WebTransport 核心)
+      sudo ufw allow 443/tcp (HTTPS 访问)
+      sudo ufw allow 80/tcp (HTTP 跳转)
 ```
-**注意**：很多云厂商（AWS/GCP/Aliyun）的安全组默认只放行 TCP。**必须显式放行 UDP 443 (或您自定义的端口)**。
+**注意**：很多云厂商（AWS/GCP/Aliyun）的安全组默认只放行 TCP。**必须显式放行 UDP 443 以及 TCP 80/443**。
 
 ### 2. 客户端证书验证
 
@@ -246,8 +248,11 @@ V5.1 引入了分级流控窗口配置，通过环境变量 `WINDOW_PROFILE` 设
 ### 部署要点
 - **协议限制**：务必确认平台已放行 **UDP** 流量，否则 WebTransport 无法建立连接。
 - **健康检查**：
-  - **推荐路径**：`/` (根路径)。
   - **安全性说明**：由于网关内置主动探测防御，非协议请求访问根路径将返回“伪装站点”内容。使用 `/` 作为健康检查可以完美隐藏服务特征，避免暴露协议入口路径 `/v1/api/sync`。
+
+### 7.2 持久化与升级策略
+- **伪装站保护**：`deploy.sh` 脚本在更新时会自动检测已存在的伪装站点（位于 `deploy/decoy`），并询问是否覆盖，防止误删您的自定义修改。
+- **卸载保留**：执行卸载操作时，默认保留伪装站点及证书数据，方便快速重建或迁移。
 
 ---
 

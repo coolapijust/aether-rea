@@ -1,7 +1,7 @@
 # Aether-Realist
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-V5.0.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-V5.1.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go">
   <img src="https://img.shields.io/badge/WebTransport-HTTP%2F3-orange.svg" alt="WebTransport">
@@ -52,7 +52,7 @@ graph TD
 ```
 
 ### 组件说明
-1.  **Aether Gateway (服务端)**: 核心中转站。支持传统的 Linux/Windows 服务器、云原生 PaaS 平台以及 Docker 容器化一键部署。
+1.  **Aether Gateway (服务端)**: 核心中转站。支持自动 HTTP->HTTPS 重定向与多态伪装，兼容 Linux/Windows 服务器及云原生 PaaS 平台。
 2.  **Aether Core (aetherd)**: 本地守护进程。负责协议封装、系统代理自动配置、路由规则匹配及连接生命周期管理。
 3.  **Aether Dashboard (GUI)**: 跨平台桌面控制面板。基于 Tauri + React 构建，提供实时的流量拓扑、延迟监测及可视化规则编辑。
 
