@@ -123,6 +123,11 @@ install_service() {
     CURRENT_DOMAIN=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d'=' -f2)
     CURRENT_CADDY_PORT=$(grep "^CADDY_PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
     CURRENT_RECORD_PAYLOAD=$(grep "^RECORD_PAYLOAD_BYTES=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+    CURRENT_DECOY_PATH=$(grep "^DECOY_PATH=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+    CURRENT_HOST_CERT_PATH=$(grep "^HOST_CERT_PATH=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"")
+    CURRENT_HOST_KEY_PATH=$(grep "^HOST_KEY_PATH=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"")
+    CURRENT_CERT_FILE=$(grep "^CERT_FILE=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+    CURRENT_KEY_FILE=$(grep "^KEY_FILE=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
 
     # 过滤默认占位符 (防止 .env.example 的值被误用)
     if [ "$CURRENT_PSK" = "your_super_secret_token" ]; then
@@ -220,18 +225,74 @@ install_service() {
         fi
     fi
 
-    # 4. 多态伪装站点配置 (迁移至独立目录)
-    echo -e "\n${YELLOW}[4/4] 配置多态伪装系统...${NC}"
-    echo "请选择伪装站点类型 (将在 443/监听端口 展示):"
-        echo "1) [推荐] 企业级 SSO 登录门户 (Enterprise Access)"
-        echo "2) [可选] IT 运维监控面板 (System Monitor)"
-        echo "3) [兜底] Nginx 403 错误页 (Forbidden)"
-        echo "4) [自定义] Git 仓库地址 (例如 GitHub Pages)"
-        echo "5) [自定义] 本地目录路径"
-        read -p "请输入选项 [1-5]: " DECOY_OPT
+    DECOY_PATH=""
+    HOST_CERT_PATH=""
+    HOST_KEY_PATH=""
+    CONTAINER_CERT_PATH="/certs/server.crt"
+    CONTAINER_KEY_PATH="/certs/server.key"
 
-        DECOY_PATH=""
-        
+    HAS_EXISTING_DECOY=0
+    if [ -f "deploy/decoy/index.html" ]; then
+        HAS_EXISTING_DECOY=1
+    elif [ -n "$CURRENT_DECOY_PATH" ] && [ -d "$CURRENT_DECOY_PATH" ]; then
+        HAS_EXISTING_DECOY=1
+    fi
+
+    HAS_EXISTING_CERT=0
+    if [ -f "deploy/certs/server.crt" ] && [ -f "deploy/certs/server.key" ]; then
+        HAS_EXISTING_CERT=1
+    elif [ -n "$CURRENT_HOST_CERT_PATH" ] && [ -n "$CURRENT_HOST_KEY_PATH" ] && [ -f "$CURRENT_HOST_CERT_PATH" ] && [ -f "$CURRENT_HOST_KEY_PATH" ]; then
+        HAS_EXISTING_CERT=1
+    fi
+
+    REUSE_EXISTING_CONFIG="n"
+    if [ "$HAS_EXISTING_DECOY" = "1" ] || [ "$HAS_EXISTING_CERT" = "1" ]; then
+        read -p "检测到已有伪装站/证书配置，更新时是否沿用并跳过重配? [Y/n]: " REUSE_CONFIRM
+        if [[ ! "$REUSE_CONFIRM" =~ ^[Nn]$ ]]; then
+            REUSE_EXISTING_CONFIG="y"
+        fi
+    fi
+
+    if [ "$REUSE_EXISTING_CONFIG" = "y" ]; then
+        DECOY_PATH=${CURRENT_DECOY_PATH:-deploy/decoy}
+        HOST_CERT_PATH="$CURRENT_HOST_CERT_PATH"
+        HOST_KEY_PATH="$CURRENT_HOST_KEY_PATH"
+        CONTAINER_CERT_PATH=${CURRENT_CERT_FILE:-/certs/server.crt}
+        CONTAINER_KEY_PATH=${CURRENT_KEY_FILE:-/certs/server.key}
+
+        # 若历史外部证书路径失效，自动回退到默认证书目录。
+        if [ -n "$HOST_CERT_PATH" ] && [ -n "$HOST_KEY_PATH" ] && { [ ! -f "$HOST_CERT_PATH" ] || [ ! -f "$HOST_KEY_PATH" ]; }; then
+            echo -e "${YELLOW}检测到历史外部证书路径失效，回退到 deploy/certs 或自签名证书。${NC}"
+            HOST_CERT_PATH=""
+            HOST_KEY_PATH=""
+            CONTAINER_CERT_PATH="/certs/server.crt"
+            CONTAINER_KEY_PATH="/certs/server.key"
+        fi
+
+        if [ -z "$HOST_CERT_PATH" ] && { [ ! -f "deploy/certs/server.crt" ] || [ ! -f "deploy/certs/server.key" ]; }; then
+            DOMAIN_FOR_CERT=$(echo "${DOMAIN:-$CURRENT_DOMAIN}" | tr -d "'\"")
+            [ -z "$DOMAIN_FOR_CERT" ] && DOMAIN_FOR_CERT="localhost"
+            echo -e "${YELLOW}未找到可复用证书，正在自动生成 10 年期自签名证书...${NC}"
+            mkdir -p deploy/certs
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout deploy/certs/server.key \
+                -out deploy/certs/server.crt \
+                -subj "/CN=$DOMAIN_FOR_CERT" &> /dev/null
+            echo -e "${GREEN}自签名证书已生成。${NC}"
+        fi
+
+        echo -e "${GREEN}已沿用历史伪装站与证书配置，跳过重配。${NC}"
+    else
+        # 4. 多态伪装站点配置 (迁移至独立目录)
+        echo -e "\n${YELLOW}[4/4] 配置多态伪装系统...${NC}"
+        echo "请选择伪装站点类型 (将在 443/监听端口 展示):"
+            echo "1) [推荐] 企业级 SSO 登录门户 (Enterprise Access)"
+            echo "2) [可选] IT 运维监控面板 (System Monitor)"
+            echo "3) [兜底] Nginx 403 错误页 (Forbidden)"
+            echo "4) [自定义] Git 仓库地址 (例如 GitHub Pages)"
+            echo "5) [自定义] 本地目录路径"
+            read -p "请输入选项 [1-5]: " DECOY_OPT
+
         # 伪装引擎逻辑
         setup_decoy() {
             local TEMPLATE_TYPE="$1"
@@ -306,11 +367,6 @@ EOF
         echo "3) 指定宿主机绝对路径 (例如 /etc/letsencrypt/...)"
         read -p "请选择 [1-3]: " CERT_OPT
 
-        HOST_CERT_PATH=""
-        HOST_KEY_PATH=""
-        CONTAINER_CERT_PATH="/certs/server.crt"
-        CONTAINER_KEY_PATH="/certs/server.key"
-
         case $CERT_OPT in
             2)
                 if [ -f "deploy/certs/server.crt" ] && [ -f "deploy/certs/server.key" ]; then
@@ -339,17 +395,20 @@ EOF
 
         if [ "$CERT_OPT" = "1" ]; then
             if [ ! -f "deploy/certs/server.crt" ]; then
+                DOMAIN_FOR_CERT=$(echo "${DOMAIN:-$CURRENT_DOMAIN}" | tr -d "'\"")
+                [ -z "$DOMAIN_FOR_CERT" ] && DOMAIN_FOR_CERT="localhost"
                 echo -e "${YELLOW}正在生成 10 年期自签名证书...${NC}"
                 mkdir -p deploy/certs
                 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
                     -keyout deploy/certs/server.key \
                     -out deploy/certs/server.crt \
-                    -subj "/CN=$DOMAIN" &> /dev/null
+                    -subj "/CN=$DOMAIN_FOR_CERT" &> /dev/null
                 echo -e "${GREEN}自签名证书已生成。${NC}"
             else
                 echo -e "${GREEN}检测到现有自签名证书，跳过生成。${NC}"
             fi
         fi
+    fi
 
     # 写入环境变量文件 (覆盖旧的配置)
     sed -i "/^CADDY_SITE_ADDRESS=/d" "$ENV_FILE"
