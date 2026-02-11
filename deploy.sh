@@ -70,6 +70,14 @@ install_service() {
     CURRENT_PSK=$(grep "^PSK=" "$ENV_FILE" | cut -d'=' -f2)
     CURRENT_DOMAIN=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d'=' -f2)
 
+    # 过滤默认占位符 (防止 .env.example 的值被误用)
+    if [ "$CURRENT_PSK" = "your_super_secret_token" ]; then
+        CURRENT_PSK=""
+    fi
+    if [ "$CURRENT_DOMAIN" = "your-domain.com" ]; then
+        CURRENT_DOMAIN=""
+    fi
+
     # 交互输入 PSK
     if [ -z "$CURRENT_PSK" ]; then
         AUTO_PSK=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
