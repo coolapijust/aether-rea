@@ -347,16 +347,24 @@ EOF
     # 生成 Docker Compose 配置
     echo -e "${YELLOW}生成 Docker Compose 配置...${NC}"
     
+    # [Fix] 处理 Docker Compose 相对路径问题 (Must start with ./)
+    # 如果 DECOY_PATH 是默认值 "deploy/decoy" (相对于项目根目录)，
+    # 在 deploy/docker-compose.yml 的上下文中，它应该是 "./decoy"
+    COMPOSE_DECOY_PATH="${DECOY_PATH:-deploy/decoy}"
+    if [ "$COMPOSE_DECOY_PATH" == "deploy/decoy" ]; then
+        COMPOSE_DECOY_PATH="./decoy"
+    fi
+
     # 根据是否使用外部证书决定挂载卷配置
     if [ -n "$HOST_CERT_PATH" ] && [ -n "$HOST_KEY_PATH" ]; then
         VOLUME_CONFIG="
       - ${HOST_CERT_PATH}:/certs/custom.crt:ro
       - ${HOST_KEY_PATH}:/certs/custom.key:ro
-      - ${DECOY_PATH:-deploy/decoy}:/decoy:ro"
+      - ${COMPOSE_DECOY_PATH}:/decoy:ro"
     else
         VOLUME_CONFIG="
       - ./certs:/certs:ro
-      - ${DECOY_PATH:-deploy/decoy}:/decoy:ro"
+      - ${COMPOSE_DECOY_PATH}:/decoy:ro"
     fi
 
     cat > deploy/docker-compose.yml <<EOF
