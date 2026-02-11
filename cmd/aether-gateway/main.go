@@ -162,32 +162,31 @@ func main() {
 		}
 	}
 
-	// V5.1 Optimization: Multi-tiered Flow Control Windows
-	var streamWin, connWin, maxStreamWin, maxConnWin uint64
+	// V5.2: Profile defaults + optional explicit QUIC window overrides.
 	profile := os.Getenv("WINDOW_PROFILE")
-	switch profile {
-	case "conservative":
-		streamWin = 512 * 1024
-		connWin = 1536 * 1024
-		maxStreamWin = 2 * 1024 * 1024
-		maxConnWin = 4 * 1024 * 1024
-	case "aggressive":
-		// Aggressive: Faster ramp-up for high-latency links.
-		// Keep aggressive profile aligned with GUI core defaults to avoid
-		// receiver-side bottlenecks after quic-go upgrades.
-		streamWin = 4 * 1024 * 1024
-		connWin = 8 * 1024 * 1024
-		maxStreamWin = 32 * 1024 * 1024
-		maxConnWin = 48 * 1024 * 1024
-	default:
-		profile = "normal"
-		// Normal: Balanced profile for general use.
-		streamWin = 2 * 1024 * 1024
-		connWin = 3 * 1024 * 1024
-		maxStreamWin = 4 * 1024 * 1024
-		maxConnWin = 8 * 1024 * 1024
+	windowCfg, err := core.ResolveQUICWindowConfig(profile)
+	if err != nil {
+		log.Fatalf("Invalid QUIC window config: %v", err)
 	}
-	log.Printf("V5.1 Config: Using WINDOW_PROFILE=%s (Stream: %d, Conn: %d)", profile, streamWin, connWin)
+	if windowCfg.OverrideApplied {
+		log.Printf(
+			"V5.2 Config: WINDOW_PROFILE=%s + manual QUIC windows (init_stream=%d init_conn=%d max_stream=%d max_conn=%d)",
+			windowCfg.Profile,
+			windowCfg.InitialStreamReceiveWindow,
+			windowCfg.InitialConnectionReceiveWindow,
+			windowCfg.MaxStreamReceiveWindow,
+			windowCfg.MaxConnectionReceiveWindow,
+		)
+	} else {
+		log.Printf(
+			"V5.2 Config: WINDOW_PROFILE=%s (init_stream=%d init_conn=%d max_stream=%d max_conn=%d)",
+			windowCfg.Profile,
+			windowCfg.InitialStreamReceiveWindow,
+			windowCfg.InitialConnectionReceiveWindow,
+			windowCfg.MaxStreamReceiveWindow,
+			windowCfg.MaxConnectionReceiveWindow,
+		)
+	}
 
 	quicConfig := &quic.Config{
 		EnableDatagrams:                true,
@@ -196,10 +195,10 @@ func main() {
 		KeepAlivePeriod:                10 * time.Second,
 		Allow0RTT:                      true,
 		MaxIncomingStreams:             1000,
-		InitialStreamReceiveWindow:     streamWin,
-		InitialConnectionReceiveWindow: connWin,
-		MaxStreamReceiveWindow:         maxStreamWin,
-		MaxConnectionReceiveWindow:     maxConnWin,
+		InitialStreamReceiveWindow:     windowCfg.InitialStreamReceiveWindow,
+		InitialConnectionReceiveWindow: windowCfg.InitialConnectionReceiveWindow,
+		MaxStreamReceiveWindow:         windowCfg.MaxStreamReceiveWindow,
+		MaxConnectionReceiveWindow:     windowCfg.MaxConnectionReceiveWindow,
 		Tracer:                         tracer,
 	}
 

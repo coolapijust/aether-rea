@@ -12,7 +12,14 @@ services:
       - SSL_CERT_FILE=${CERT_FILE:-/certs/server.crt}
       - SSL_KEY_FILE=${KEY_FILE:-/certs/server.key}
       - DECOY_ROOT=/decoy
+      - WINDOW_PROFILE=${WINDOW_PROFILE:-normal}
       - RECORD_PAYLOAD_BYTES=${RECORD_PAYLOAD_BYTES:-16384}
+      - PERF_DIAG_ENABLE=${PERF_DIAG_ENABLE:-0}
+      - PERF_DIAG_INTERVAL_SEC=${PERF_DIAG_INTERVAL_SEC:-10}
+      - QUIC_INITIAL_STREAM_RECV_WINDOW=${QUIC_INITIAL_STREAM_RECV_WINDOW:-}
+      - QUIC_INITIAL_CONN_RECV_WINDOW=${QUIC_INITIAL_CONN_RECV_WINDOW:-}
+      - QUIC_MAX_STREAM_RECV_WINDOW=${QUIC_MAX_STREAM_RECV_WINDOW:-}
+      - QUIC_MAX_CONN_RECV_WINDOW=${QUIC_MAX_CONN_RECV_WINDOW:-}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

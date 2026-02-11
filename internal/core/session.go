@@ -77,32 +77,30 @@ func (sm *sessionManager) initialize() error {
 		return fmt.Errorf("url must be https")
 	}
 
-	// V5.1 Optimization: Multi-tiered Flow Control Windows
-	var streamWin, connWin, maxStreamWin, maxConnWin uint64
-	profile := sm.config.WindowProfile
-	switch profile {
-	case "conservative":
-		streamWin = 512 * 1024
-		connWin = 1536 * 1024
-		maxStreamWin = 2 * 1024 * 1024
-		maxConnWin = 4 * 1024 * 1024
-	case "aggressive":
-		// Aggressive: Faster ramp-up for high-latency links.
-		// V5.1 Optimization (Phase 7): Restore large window ceilings to match V5.0
-		// and allow BBR to saturate the link. 32MB is typical for modern browsers.
-		streamWin = 4 * 1024 * 1024
-		connWin = 8 * 1024 * 1024
-		maxStreamWin = 32 * 1024 * 1024
-		maxConnWin = 48 * 1024 * 1024
-	default:
-		profile = "normal"
-		// Normal: Balanced profile for general use.
-		streamWin = 2 * 1024 * 1024
-		connWin = 3 * 1024 * 1024
-		maxStreamWin = 4 * 1024 * 1024
-		maxConnWin = 8 * 1024 * 1024
+	// V5.2: Profile defaults + optional explicit QUIC window overrides.
+	windowCfg, err := ResolveQUICWindowConfig(sm.config.WindowProfile)
+	if err != nil {
+		return fmt.Errorf("invalid QUIC window config: %w", err)
 	}
-	log.Printf("[DEBUG] V5.1 Config: Using WINDOW_PROFILE=%s (Stream: %d, Conn: %d)", profile, streamWin, connWin)
+	if windowCfg.OverrideApplied {
+		log.Printf(
+			"[DEBUG] V5.2 Config: WINDOW_PROFILE=%s + manual QUIC windows (init_stream=%d init_conn=%d max_stream=%d max_conn=%d)",
+			windowCfg.Profile,
+			windowCfg.InitialStreamReceiveWindow,
+			windowCfg.InitialConnectionReceiveWindow,
+			windowCfg.MaxStreamReceiveWindow,
+			windowCfg.MaxConnectionReceiveWindow,
+		)
+	} else {
+		log.Printf(
+			"[DEBUG] V5.2 Config: WINDOW_PROFILE=%s (init_stream=%d init_conn=%d max_stream=%d max_conn=%d)",
+			windowCfg.Profile,
+			windowCfg.InitialStreamReceiveWindow,
+			windowCfg.InitialConnectionReceiveWindow,
+			windowCfg.MaxStreamReceiveWindow,
+			windowCfg.MaxConnectionReceiveWindow,
+		)
+	}
 
 	quicConfig := &quic.Config{
 		KeepAlivePeriod:                20 * time.Second,
@@ -111,10 +109,10 @@ func (sm *sessionManager) initialize() error {
 		EnableStreamResetPartialDelivery: true,
 		Allow0RTT:                      true,
 		MaxIncomingStreams:             1000,
-		InitialStreamReceiveWindow:     streamWin,
-		InitialConnectionReceiveWindow: connWin,
-		MaxStreamReceiveWindow:         maxStreamWin,
-		MaxConnectionReceiveWindow:     maxConnWin,
+		InitialStreamReceiveWindow:     windowCfg.InitialStreamReceiveWindow,
+		InitialConnectionReceiveWindow: windowCfg.InitialConnectionReceiveWindow,
+		MaxStreamReceiveWindow:         windowCfg.MaxStreamReceiveWindow,
+		MaxConnectionReceiveWindow:     windowCfg.MaxConnectionReceiveWindow,
 	}
 
 	// V5.1 Performance Fix: Create a dedicated UDP socket with massive buffers

@@ -33,6 +33,9 @@ curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/depl
 - `DECOY_ROOT`：伪装站目录（可选）
 - `WINDOW_PROFILE`：`conservative` / `normal` / `aggressive`
 - `RECORD_PAYLOAD_BYTES`：数据记录分片大小（默认 `16384`）
+- `PERF_DIAG_ENABLE`：性能诊断日志开关（`1` 开启）
+- `PERF_DIAG_INTERVAL_SEC`：性能诊断日志周期（默认 `10`）
+- `QUIC_*_RECV_WINDOW`：可选，覆盖 `WINDOW_PROFILE` 的窗口值
 
 示例：
 
@@ -50,6 +53,12 @@ services:
       - DECOY_ROOT=/decoy
       - WINDOW_PROFILE=normal
       - RECORD_PAYLOAD_BYTES=16384
+      - PERF_DIAG_ENABLE=0
+      - PERF_DIAG_INTERVAL_SEC=10
+      - QUIC_INITIAL_STREAM_RECV_WINDOW=
+      - QUIC_INITIAL_CONN_RECV_WINDOW=
+      - QUIC_MAX_STREAM_RECV_WINDOW=
+      - QUIC_MAX_CONN_RECV_WINDOW=
     volumes:
       - ./certs:/certs:ro
       - ${DECOY_PATH}:/decoy:ro
@@ -110,6 +119,76 @@ sysctl -w net.core.wmem_max=33554432
 - `16384`（默认）
 
 建议在同一网络环境下做 3 轮测速对比后固定配置。
+
+### 6.4 QUIC 窗口覆盖 A/B（进阶）
+
+在 `WINDOW_PROFILE` 基础上，可通过以下变量做细调：
+
+- `QUIC_INITIAL_STREAM_RECV_WINDOW`
+- `QUIC_INITIAL_CONN_RECV_WINDOW`
+- `QUIC_MAX_STREAM_RECV_WINDOW`
+- `QUIC_MAX_CONN_RECV_WINDOW`
+
+单位均为字节。留空表示不覆盖，继续使用 `WINDOW_PROFILE` 默认值。
+
+示例（高延迟链路试验）：
+
+```env
+WINDOW_PROFILE=aggressive
+QUIC_INITIAL_STREAM_RECV_WINDOW=6291456
+QUIC_INITIAL_CONN_RECV_WINDOW=12582912
+QUIC_MAX_STREAM_RECV_WINDOW=50331648
+QUIC_MAX_CONN_RECV_WINDOW=67108864
+```
+
+### 6.5 性能诊断日志（定位下行瓶颈）
+
+开启：
+
+```env
+PERF_DIAG_ENABLE=1
+PERF_DIAG_INTERVAL_SEC=10
+```
+
+日志关键字：`[PERF]`。示例字段：
+
+- `down.mbps / up.mbps`：窗口内吞吐
+- `down.read_us`：单 record 下行读取平均耗时
+- `down.parse_us`：单 record 解析平均耗时
+- `up.build_us`：上行封包平均耗时
+- `up.write_us`：上行写入平均耗时
+
+### 6.6 一键 A/B 调优脚本
+
+仓库提供 `deploy/perf-tune.sh`，用于脚本化执行：
+
+- 开关性能诊断
+- 应用 QUIC 窗口预设
+- 自动重启容器
+- 抓取 `[PERF]` 日志
+
+示例：
+
+```bash
+chmod +x deploy/perf-tune.sh
+
+# 查看当前参数
+./deploy/perf-tune.sh status
+
+# 应用基线（仅 WINDOW_PROFILE）
+./deploy/perf-tune.sh apply baseline 16384
+
+# 应用下行优化预设 A/B/C
+./deploy/perf-tune.sh apply dl-a 16384
+./deploy/perf-tune.sh apply dl-b 16384
+./deploy/perf-tune.sh apply dl-c 16384
+
+# 连续抓取 120 秒性能日志
+./deploy/perf-tune.sh logs 120
+
+# 查看推荐测试矩阵
+./deploy/perf-tune.sh matrix
+```
 
 ## 7. 运行检查
 

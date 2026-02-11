@@ -58,6 +58,7 @@ func (r *RecordReader) Read(p []byte) (int, error) {
 
 // ReadNextRecord reads and parses a single record.
 func (r *RecordReader) ReadNextRecord() (*Record, error) {
+	readStart := time.Now()
 	lengthBytes := make([]byte, 4)
 	if _, err := io.ReadFull(r.reader, lengthBytes); err != nil {
 		return nil, err
@@ -88,7 +89,9 @@ func (r *RecordReader) ReadNextRecord() (*Record, error) {
 		}
 		return nil, err
 	}
+	perfObserveDownRead(int(totalLength)+4, time.Since(readStart))
 
+	parseStart := time.Now()
 	version := recordBytes[headerVersionOffset]
 	if version != ProtocolVersion {
 		return nil, errors.New("unsupported protocol version")
@@ -136,6 +139,7 @@ func (r *RecordReader) ReadNextRecord() (*Record, error) {
 			result.ErrorMessage = string(payload[4:])
 		}
 	}
+	perfObserveDownParse(time.Since(parseStart))
 	return result, nil
 }
 
@@ -183,14 +187,18 @@ func (rw *RecordReadWriter) Write(p []byte) (n int, err error) {
 
 		// V5.1: Build record with NonceGenerator and Buffer Pool
 		// Data records now have 0 padding for maximum throughput
+		buildStart := time.Now()
 		record, err := BuildDataRecord(chunk, rw.maxPadding, rw.nonceGen)
 		if err != nil {
 			return totalWritten, err
 		}
+		perfObserveUpBuild(time.Since(buildStart))
 		
 		// V5.1 Critical Fix: Do NOT use defer in loop.
 		// Release pooled buffer immediately after writing to the stream.
+		writeStart := time.Now()
 		_, err = rw.writer.Write(record)
+		perfObserveUpWrite(len(record), time.Since(writeStart))
 		PutBuffer(record)
 		if err != nil {
 			return totalWritten, err

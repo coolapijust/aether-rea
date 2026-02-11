@@ -472,7 +472,9 @@ func DecryptMetadata(record *Record, psk string) (*Metadata, error) {
 		return nil, err
 	}
 
+	decryptStart := time.Now()
 	plaintext, err := gcm.Open(nil, nonce[:], record.Payload, header)
+	perfObserveDownDecrypt(time.Since(decryptStart))
 	if err != nil {
 		return nil, err
 	}

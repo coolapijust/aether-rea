@@ -31,8 +31,10 @@ Aether-Realist 是一套基于 **WebTransport (HTTP/3)** 的高性能代理系�
     * `conservative`: 512KB / 1.5MB / 2MB / 4MB
     * `normal`: 2MB / 3MB / 4MB / 8MB
     * `aggressive`: 4MB / 8MB / 32MB / 48MB
+*   **窗口手工覆盖（可选）**：支持 `QUIC_*_RECV_WINDOW` 四个环境变量，对窗口做精细 A/B。
 *   **可调分片大小 (`RECORD_PAYLOAD_BYTES`)**：默认 16KB，可按链路 A/B 调整（如 4KB/8KB/16KB）。
 *   **大 UDP 缓冲**：客户端/网关均尝试设置 32MB UDP 读写缓冲。
+*   **内置性能诊断 (`PERF_DIAG_ENABLE`)**：周期输出上下行读写/解析耗时与吞吐，便于定位下行瓶颈。
 
 ---
 
@@ -82,6 +84,7 @@ curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/depl
 4. 启动 `aether-gateway` 容器。
 
 > 详细参数配置请参阅：[部署指南](docs/deployment.md)
+> 下载瓶颈定位可直接使用：`deploy/perf-tune.sh`（自动应用窗口预设、重启并抓 PERF 日志）。
 
 ### 2. 本地客户端
 推荐直接使用 GUI（会启动并管理 `aetherd`）。
