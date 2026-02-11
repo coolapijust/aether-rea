@@ -29,7 +29,32 @@ const (
 	TypeError          = 0x7f
 	MaxRecordSize      = 1 * 1024 * 1024
 	MaxCounterValue    = uint64(1 << 32) // 2^32 rekey threshold
+	// V5.1 Optimization: Smaller chunks reduce AEAD HoL Blocking on slow links
+	MaxRecordPayload   = 16 * 1024
+	// PoolBufferSize = Payload + Header + AEAD Overhead (approx 16.5KB)
+	PoolBufferSize     = MaxRecordPayload + RecordHeaderLength + 32 
 )
+
+var recordPool = sync.Pool{
+	New: func() interface{} {
+		// Pre-allocate buffer with enough capacity for a full record
+		return make([]byte, PoolBufferSize)
+	},
+}
+
+// GetBuffer returns a clean buffer from the pool.
+func GetBuffer() []byte {
+	buf := recordPool.Get().([]byte)
+	return buf[:0] // Reset length while keeping capacity
+}
+
+// PutBuffer returns a buffer to the pool.
+func PutBuffer(buf []byte) {
+	if cap(buf) < PoolBufferSize {
+		return // Protection against resizing
+	}
+	recordPool.Put(buf[:0])
+}
 
 const (
 	headerVersionOffset      = 0
@@ -179,7 +204,7 @@ func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string
 	return buildRecord(header, ciphertext, padding), nil
 }
 
-// BuildDataRecord creates a data record with optional padding.
+// BuildDataRecord creates a data record with optional padding using pooled buffers.
 // V5.1: Automatically forces padding to 0 for TypeData to maximize throughput.
 // V5: Requires NonceGenerator for counter-based nonce.
 func BuildDataRecord(payload []byte, _ uint16, ng *NonceGenerator) ([]byte, error) {
@@ -198,7 +223,22 @@ func BuildDataRecord(payload []byte, _ uint16, ng *NonceGenerator) ([]byte, erro
 		return nil, err
 	}
 
-	return buildRecord(header, payload, nil), nil
+	totalLength := RecordHeaderLength + len(payload)
+	// Use pool for data records which are the bulk of traffic
+	buf := GetBuffer()
+	
+	// Ensure we have enough capacity (should always be true with 16KB limit)
+	if cap(buf) < 4+totalLength {
+		buf = make([]byte, 4+totalLength)
+	} else {
+		buf = buf[:4+totalLength]
+	}
+
+	binary.BigEndian.PutUint32(buf[0:4], uint32(totalLength))
+	copy(buf[4:4+RecordHeaderLength], header)
+	copy(buf[4+RecordHeaderLength:], payload)
+	
+	return buf, nil
 }
 
 // BuildPingRecord creates a ping record.

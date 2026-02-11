@@ -83,11 +83,12 @@ func (sm *sessionManager) initialize() error {
 		maxConnWin = 4 * 1024 * 1024
 	case "aggressive":
 		// Aggressive: Faster ramp-up for high-latency links.
-		// Stream window locked to 4MB max as per safety requirements.
+		// V5.1 Optimization (Phase 7): Restore large window ceilings to match V5.0
+		// and allow BBR to saturate the link. 32MB is typical for modern browsers.
 		streamWin = 4 * 1024 * 1024
-		connWin = 6 * 1024 * 1024
-		maxStreamWin = 4 * 1024 * 1024
-		maxConnWin = 12 * 1024 * 1024
+		connWin = 8 * 1024 * 1024
+		maxStreamWin = 32 * 1024 * 1024
+		maxConnWin = 48 * 1024 * 1024
 	default:
 		profile = "normal"
 		// Normal: Balanced profile for general use.

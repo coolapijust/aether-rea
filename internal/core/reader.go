@@ -139,12 +139,6 @@ func (rw *RecordReadWriter) Write(p []byte) (n int, err error) {
 	totalWritten := 0
 	src := p
 
-	// V5.1 Optimization: 
-	// Use 64KB as fixed maximum chunk size for application-layer records.
-	// This avoids excessive header overhead of small chunks (V5.0 behavior)
-	// while preventing AEAD latency spikes of too large records.
-	const MaxRecordPayload = 64 * 1024
-
 	for len(src) > 0 {
 		chunkSize := len(src)
 		if chunkSize > MaxRecordPayload {
@@ -153,12 +147,15 @@ func (rw *RecordReadWriter) Write(p []byte) (n int, err error) {
 
 		chunk := src[:chunkSize]
 
-		// V5.1: Build record with NonceGenerator
+		// V5.1: Build record with NonceGenerator and Buffer Pool
 		// Data records now have 0 padding for maximum throughput
 		record, err := BuildDataRecord(chunk, rw.maxPadding, rw.nonceGen)
 		if err != nil {
 			return totalWritten, err
 		}
+		
+		// V5.1 Note: record is now a pooled buffer from BuildDataRecord
+		defer PutBuffer(record)
 
 		_, err = rw.writer.Write(record)
 		if err != nil {
