@@ -173,6 +173,31 @@ export default function Rules() {
                 helperText={t.rules.helper_prewarm}
                 sx={{ maxWidth: 200 }}
               />
+
+              <Divider />
+
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>
+                  {t.rules.label_window_profile}
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  {[
+                    { id: 'conservative', label: t.rules.profile_conservative },
+                    { id: 'normal', label: t.rules.profile_normal },
+                    { id: 'aggressive', label: t.rules.profile_aggressive },
+                  ].map((p) => (
+                    <Button
+                      key={p.id}
+                      variant={editingConfig.window_profile === p.id || (!editingConfig.window_profile && p.id === 'normal') ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={() => updateEditingConfig({ window_profile: p.id as any })}
+                      sx={{ textTransform: 'none', borderRadius: 2 }}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </Box>
+              </Box>
             </Box>
           )}
 

@@ -72,16 +72,42 @@ func (sm *sessionManager) initialize() error {
 		return fmt.Errorf("url must be https")
 	}
 
+	// V5.1 Optimization: Multi-tiered Flow Control Windows
+	var streamWin, connWin, maxStreamWin, maxConnWin int64
+	profile := sm.config.WindowProfile
+	switch profile {
+	case "conservative":
+		streamWin = 512 * 1024
+		connWin = 1536 * 1024
+		maxStreamWin = 2 * 1024 * 1024
+		maxConnWin = 4 * 1024 * 1024
+	case "aggressive":
+		// Aggressive: Faster ramp-up for high-latency links.
+		// Stream window locked to 4MB max as per safety requirements.
+		streamWin = 4 * 1024 * 1024
+		connWin = 6 * 1024 * 1024
+		maxStreamWin = 4 * 1024 * 1024
+		maxConnWin = 12 * 1024 * 1024
+	default:
+		profile = "normal"
+		// Normal: Balanced profile for general use.
+		streamWin = 2 * 1024 * 1024
+		connWin = 3 * 1024 * 1024
+		maxStreamWin = 4 * 1024 * 1024
+		maxConnWin = 8 * 1024 * 1024
+	}
+	log.Printf("[DEBUG] V5.1 Config: Using WINDOW_PROFILE=%s (Stream: %d, Conn: %d)", profile, streamWin, connWin)
+
 	quicConfig := &quic.Config{
 		KeepAlivePeriod:                20 * time.Second,
 		MaxIdleTimeout:                 60 * time.Second,
 		EnableDatagrams:                true,
 		Allow0RTT:                      true,
 		MaxIncomingStreams:             1000,
-		InitialStreamReceiveWindow:     4 * 1024 * 1024,  // 4 MB (Initial)
-		InitialConnectionReceiveWindow: 6 * 1024 * 1024,  // 6 MB (Initial)
-		MaxStreamReceiveWindow:         32 * 1024 * 1024, // 32 MB (Max)
-		MaxConnectionReceiveWindow:     48 * 1024 * 1024, // 48 MB (Max)
+		InitialStreamReceiveWindow:     streamWin,
+		InitialConnectionReceiveWindow: connWin,
+		MaxStreamReceiveWindow:         maxStreamWin,
+		MaxConnectionReceiveWindow:     maxConnWin,
 	}
 
 	sm.dialer = &webtransport.Dialer{

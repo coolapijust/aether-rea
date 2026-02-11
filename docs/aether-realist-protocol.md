@@ -1,6 +1,6 @@
-# Aether-Realist 协议定义（V5）
+# Aether-Realist 协议定义（V5.1）
 
-> 状态：正式版本 (Finalized)
+> 状态：草案 (Draft)
 
 ## 1. 术语与约定
 
@@ -15,7 +15,10 @@
 - **承载层**：WebTransport over HTTP/3。
 - **无状态**：服务端仅在单个 WebTransport 会话范围内维护状态，关闭即释放。
 - **会话握手**：依赖 HTTP/3 + WebTransport 建立，不引入额外握手包。
-- **0-RTT 支持**：V5 版本 **开启 0-RTT** (Early Data)。为了防御重放攻击，协议内置了时间戳校验与单调计数器校验。
+- **0-RTT 支持**：V5.1 版本 **开启 0-RTT** (Early Data)。为了防御重放攻击，协议内置了时间戳校验与单调计数器校验。
+- **V5.1 优化**：
+    - **移除强制填充 (No Data Padding)**：传输数据记录时不再添加随机填充，最大化吞吐量。
+    - **动态切片 (Dynamic Slicing)**：应用层写入记录大小上限为 **64KB** (匹配 AEAD 最佳块大小)，底层由 QUIC 负责分包。
 
 ## 2.1 握手状态机 (Handshake State Machine)
 
@@ -28,7 +31,7 @@
 
 ## 3. Record 帧结构
 
-每条 Record 采用统一的封装格式，V5 协议头长度为 **30 字节**：
+每条 Record 采用统一的封装格式，V5.1 协议头长度为 **30 字节**：
 
 ```
 0                   1                   2                   3
@@ -53,11 +56,13 @@
 ```
 
 - **Length Prefix**：Record 的总长度（Header + Payload + Padding），不包含自身长度字段。
-- **Version**：协议版本，V5 必须为 `0x05`。
+- **Version**：协议版本，V5.1 必须为 `0x05` (保持兼容) 或协商的新版本号。
 - **Type**：Record 类型。
 - **Timestamp Nano**：发送端纳秒时间戳，用于防御重放。
-- **Payload Length**：载荷长度。
+- **Payload Length**：载荷长度，V5.1 建议最大 64KB。
 - **Padding Length**：填充长度。
+    - **TypeData (0x02)**: V5.1 必须为 `0`。
+    - **TypeMetadata (0x01)**: 必须为随机值 (16-256 字节)。
 - **Session ID**：4 字节随机会话标识，仅在会话建立时生成；客户端与服务端必须使用 **不同的 Session ID**（每个方向独立），以确保双向流量的 Nonce 不会碰撞。
 - **Ctr**：8 字节单调递增计数器，每发送一个 Record 必须自增 1，初始值为 `0`。
 
@@ -77,7 +82,7 @@
 
 Metadata Record 的 Payload 必须使用 `AES-128-GCM` 加密。
 
-- **Key Derivation (Zero-Sync V5)**：
+- **Key Derivation (Zero-Sync V5.1)**：
     - `PRK = HKDF-Extract(salt=SessionID, IKM=PSK)`。
     - `Key = HKDF-Expand(PRK, info="aether-realist-v5", L=16)`。
 - **Nonce/IV**：`SessionID(4B) || Ctr(8B)` 拼接而成的 12 字节值；由于每个方向使用独立 Session ID，同一密钥下不会出现双向计数器冲突。
@@ -99,7 +104,7 @@ Metadata Record 的 Payload 必须使用 `AES-128-GCM` 加密。
 ## 7. 流量混淆 (Traffic Chunking)
 
 - **载荷特征对齐**：发送端应模拟实时流媒体（Real-time Streaming）或云端渲染（Cloud Rendering）的流量特征。
-- **动态切片**：数据流应拆分为 **2KB - 32KB** 的随机大小片段，禁止基于 MTU 的对齐，以对抗统计学指纹分析。
+- **动态切片 (Dynamic Slicing)**：V5.1 弃用了随机大小切片，改为 **64KB 动态切片**。发送端将应用层数据封装为最大 64KB 的加密 Record 写入 WebTransport 流，底层由 QUIC 协议栈根据 Path MTU（约 1350 字节）自动分包，兼顾加密效率与网络适应性。
 - **伪装端口行为**：
     - **443 端口**：必须提供符合 HTTP/3 标准的 ALPN 协商。
     - **非业务请求**：必须返回与伪装站点（Decoy Site）一致的静态资源或 404/403 响应，严禁暴露协议特有的错误码。

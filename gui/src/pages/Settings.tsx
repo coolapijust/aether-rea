@@ -86,7 +86,7 @@ export default function Settings() {
             Aether-Realist GUI v0.1.0
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Protocol: Aether-Realist v3
+            Protocol: Aether-Realist v5.1
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Core: aetherd v0.1.0

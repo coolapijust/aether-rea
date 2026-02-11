@@ -137,6 +137,7 @@ export interface CoreConfig {
   };
   bypass_cn?: boolean;
   block_ads?: boolean;
+  window_profile?: 'conservative' | 'normal' | 'aggressive';
   rules?: Rule[];
 }
 

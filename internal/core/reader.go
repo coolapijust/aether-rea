@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"math/rand"
-	"time"
 )
 
 // RecordReader reads records from a stream.
@@ -140,20 +138,22 @@ func (rw *RecordReadWriter) Write(p []byte) (n int, err error) {
 	totalWritten := 0
 	src := p
 
-	// Use a local random source seeded by time to avoid global lock contention
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	// V5.1 Optimization: 
+	// Use 64KB as fixed maximum chunk size for application-layer records.
+	// This avoids excessive header overhead of small chunks (V5.0 behavior)
+	// while preventing AEAD latency spikes of too large records.
+	const MaxRecordPayload = 64 * 1024
 
 	for len(src) > 0 {
-		// Randomize chunk size between 2KB and 16KB
-		// This breaks the correlation between application writes and network packets
-		chunkSize := 2048 + rnd.Intn(14*1024)
-		if chunkSize > len(src) {
-			chunkSize = len(src)
+		chunkSize := len(src)
+		if chunkSize > MaxRecordPayload {
+			chunkSize = MaxRecordPayload
 		}
 
 		chunk := src[:chunkSize]
 
-		// V5: Build record with NonceGenerator
+		// V5.1: Build record with NonceGenerator
+		// Data records now have 0 padding for maximum throughput
 		record, err := BuildDataRecord(chunk, rw.maxPadding, rw.nonceGen)
 		if err != nil {
 			return totalWritten, err

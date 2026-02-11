@@ -25,6 +25,7 @@ type SessionConfig struct {
 	Rotation       RotationConfig `json:"rotation,omitempty"`   // Session rotation policy
 	BypassCN       bool           `json:"bypass_cn"`             // Bypass China sites
 	BlockAds       bool           `json:"block_ads"`             // Block advertisement
+	WindowProfile  string         `json:"window_profile,omitempty"` // conservative, normal, aggressive
 	
 	Rules []*Rule `json:"rules,omitempty"` // Custom routing rules
 }

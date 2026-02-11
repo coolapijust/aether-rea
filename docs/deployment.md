@@ -1,6 +1,6 @@
 # 生产部署指南
 
-本文档详细说明了 Aether-Realist V5 版本的生产级部署方案。
+本文档详细说明了 Aether-Realist V5.1 版本的生产级部署方案。
 
 ---
 
@@ -21,11 +21,11 @@ curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/depl
 
 ## 1. 核心镜像部署 (Docker)
 
-Aether-Realist 提供了高性能的 Docker 镜像，内置 HTTP/3 WebTransport 支持与内存优化机制。V5 版本引入了更强的抗重放机制与 Session 自动轮换。
+Aether-Realist 提供了高性能的 Docker 镜像，内置 HTTP/3 WebTransport 支持与内存优化机制。V5.1 版本引入了更强的抗重放机制、Session 自动轮换以及分级流控窗口。
 
 ### 生产推荐：Docker Compose 编排 (KISS 架构)
 
-V5 版本推荐直接面向网络，移除冗余的代理层以获得极致性能。
+V5.1 版本推荐直接面向网络，移除冗余的代理层以获得极致性能。
 
 ```yaml
 services:
@@ -42,6 +42,7 @@ services:
       - SSL_CERT_FILE=/certs/server.crt
       - SSL_KEY_FILE=/certs/server.key
       - DECOY_ROOT=/decoy
+      - WINDOW_PROFILE=normal # 可选: conservative, normal, aggressive
     volumes:
       - ./certs:/certs:ro
       - ${DECOY_PATH}:/decoy:ro # 动态挂载伪装目录
@@ -56,14 +57,14 @@ services:
 
 ---
 
-## 2. 安全与性能加固 (V5 特性)
+## 2. 安全与性能加固 (V5.1 特性)
 
 ### 2.1 抗重放与 0-RTT
-V5 协议默认开启 **0-RTT** 支持。为了确保安全性，服务端实现了严格的 **单调计数器（Monotonic Counter）** 校验。
-- **运维建议**：确保服务器系统时间同步（使用 NTP），虽然 V5 主要依赖计数器防止重放，但 30s 的时间窗口校验依然作为第一道防线。
+V5.1 协议默认开启 **0-RTT** 支持。为了确保安全性，服务端实现了严格的 **单调计数器（Monotonic Counter）** 校验。
+- **运维建议**：确保服务器系统时间同步（使用 NTP），虽然 V5.1 主要依赖计数器防止重放，但 30s 的时间窗口校验依然作为第一道防线。
 
 ### 2.2 自动 Rekey 机制
-V5 引入了密钥生命周期管理。当单个 WebTransport 会话写入记录数达到 **2^32** 次时，连接将自动断开。
+V5.1 引入了密钥生命周期管理。当单个 WebTransport 会话写入记录数达到 **2^32** 次时，连接将自动断开。
 - **客户端行为**：客户端会自动感知并建立新会话，过程对用户透明。
 - **部署影响**：无须手动干预，仅需确保网关具备处理并发重连的能力。
 
@@ -170,8 +171,8 @@ docker compose -f deploy/docker-compose.yml up -d --force-recreate
 
 
 ---
- 
- ## 4. VPS 选型与深度性能调优 (Advanced Performance)
+
+## 6. VPS 选型与深度性能调优 (V5.1 优化)
 
 为了在高延迟长距离链路中跑满带宽（BDP 适配），并确保 WebTransport 协议的稳定性，建议参考以下配置与优化方案。
 
@@ -191,7 +192,7 @@ docker compose -f deploy/docker-compose.yml up -d --force-recreate
 *   **不推荐**: CentOS 7 (内核过旧，严重制约 UDP/QUIC 性能)
 
 ### 4.3 关键系统优化 (sysctl)
-Aether V5 基于 UDP 协议，必须优化 Linux 内核参数以获得最佳吞吐量。请在 `/etc/sysctl.conf` 中添加：
+Aether V5.1 基于 UDP 协议，必须优化 Linux 内核参数以获得最佳吞吐量。请在 `/etc/sysctl.conf` 中添加：
 
 ```bash
 # 开启 BBR 拥塞控制 (显著改善丢包环境速度)
@@ -224,10 +225,16 @@ root hard nofile 51200
 *需重启服务器生效*。
  
  ---
- 
- ## 5. 云原生与边缘平台部署 (PaaS)
+
+## 7. 云原生与分级窗口 (WINDOW_PROFILE)
 
 `aether-gateway` 已针对云原生环境进行了高度适配，支持在 Fly.io、Cloudflare Container 等容器平台上运行。
+
+### 7.1 分级窗口逻辑
+V5.1 引入了分级流控窗口配置，通过环境变量 `WINDOW_PROFILE` 设置，以平衡性能与指纹特征：
+- **`conservative`**: 512KB 窗口，隐蔽性极高，适用于对抗深度审查。
+- **`normal`** (默认): 2MB 窗口，通用首选。
+- **`aggressive`**: 4MB 窗口，适用于高带宽长距离链路，但在指纹特征上更明显。
 
 ### 核心优化特性
 1. **端口动态自愈**：脚本会自动检测 443 端口占用情况。若被 Nginx 占用，将自动引导至 8080 端口或用户指定端口，并自动配置 Backend 监听。
@@ -244,7 +251,7 @@ root hard nofile 51200
 
 ---
 
-## 6. 其它环境说明
+## 8. 其它环境说明
 
 项目依然保留了在 Cloudflare Workers 等边缘脚本环境运行的能力（源码参考 `src/worker.js`）。
 

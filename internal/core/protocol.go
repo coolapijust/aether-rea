@@ -180,29 +180,25 @@ func BuildMetadataRecord(host string, port uint16, maxPadding uint16, psk string
 }
 
 // BuildDataRecord creates a data record with optional padding.
+// V5.1: Automatically forces padding to 0 for TypeData to maximize throughput.
 // V5: Requires NonceGenerator for counter-based nonce.
-func BuildDataRecord(payload []byte, maxPadding uint16, ng *NonceGenerator) ([]byte, error) {
-	paddingLength := randomPadding(maxPadding)
-	padding := make([]byte, paddingLength)
-	if paddingLength > 0 {
-		if _, err := rand.Read(padding); err != nil {
-			return nil, err
-		}
-	}
-
-	// V5: Get nonce from generator
+func BuildDataRecord(payload []byte, _ uint16, ng *NonceGenerator) ([]byte, error) {
+	// V5.1 Optimization: Data records MUST NOT have padding.
+	const paddingLength = 0
+	
+	// V5.1: Get nonce from generator
 	nonce, counter, err := ng.Next()
 	if err != nil {
 		return nil, err
 	}
 	sessionID := nonce[0:4]
 
-	header, err := buildHeader(TypeData, len(payload), len(padding), sessionID, counter)
+	header, err := buildHeader(TypeData, len(payload), paddingLength, sessionID, counter)
 	if err != nil {
 		return nil, err
 	}
 
-	return buildRecord(header, payload, padding), nil
+	return buildRecord(header, payload, nil), nil
 }
 
 // BuildPingRecord creates a ping record.
