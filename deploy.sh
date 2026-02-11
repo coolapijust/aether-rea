@@ -197,17 +197,18 @@ install_service() {
     # 4. 多态伪装站点配置 (迁移至独立目录)
     echo -e "\n${YELLOW}[4/4] 配置多态伪装系统...${NC}"
     echo "请选择伪装站点类型 (将在 443/监听端口 展示):"
-        echo "1) [推荐] 专业流媒体诊断站 (Speedtest/Stream Check)"
-        echo "2) [推荐] 云端协作平台门户 (Creative Cloud Login)"
-        echo "3) [自定义] Git 仓库地址 (例如 GitHub Pages)"
-        echo "4) [自定义] 本地目录路径"
-        read -p "请输入选项 [1-4]: " DECOY_OPT
+        echo "1) [推荐] 企业级 SSO 登录门户 (Enterprise Access)"
+        echo "2) [可选] IT 运维监控面板 (System Monitor)"
+        echo "3) [兜底] Nginx 403 错误页 (Forbidden)"
+        echo "4) [自定义] Git 仓库地址 (例如 GitHub Pages)"
+        echo "5) [自定义] 本地目录路径"
+        read -p "请输入选项 [1-5]: " DECOY_OPT
 
         DECOY_PATH=""
         
         # 伪装引擎逻辑
         setup_decoy() {
-            local TEMPLATE_URL="$1"
+            local TEMPLATE_TYPE="$1"
             local DEST_DIR="deploy/decoy"
             
             # [优化] 检测已有站点，支持更新时跳过
@@ -224,60 +225,34 @@ install_service() {
 
             rm -rf "$DEST_DIR" && mkdir -p "$DEST_DIR"
             
-            if [ -n "$TEMPLATE_URL" ]; then
-                # 模拟从远程获取模板 (实际场景应为 git clone 或 curl zip)
-                # 这里暂时生成一个模拟的高逼真页面，实际应替换为真实 URL
-                echo "Downloading template from $TEMPLATE_URL..."
-                
-                # 生成多态化的 index.html
-                # 随机生成公司名和标题，避免指纹一致
-                RAND_ID=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 6)
-                CORP_NAMES=("Aether" "Nexus" "Vertex" "Prism" "Flux")
-                TITLES=("Cloud Studio" "Stream Diagnostic" "Edge Compute Portal" "Realtime Collaboration")
-                RAND_CORP=${CORP_NAMES[$((RANDOM % ${#CORP_NAMES[@]}))]}
-                RAND_TITLE=${TITLES[$((RANDOM % ${#TITLES[@]}))]}
-                
-                cat > "$DEST_DIR/index.html" <<EOF
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$RAND_TITLE - $RAND_CORP Systems</title>
-    <style>
-        :root { --primary: #$(openssl rand -hex 3); } /* 随机主题色 */
-        body { font-family: -apple-system, system-ui, sans-serif; background: #0f0f12; color: #fff; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; }
-        .container { text-align: center; max-width: 600px; padding: 40px; border: 1px solid #333; border-radius: 8px; background: #1a1a1d; }
-        h1 { font-weight: 600; letter-spacing: -0.5px; }
-        .status-dot { height: 10px; width: 10px; background-color: #00ff88; border-radius: 50%; display: inline-block; margin-right: 8px; box-shadow: 0 0 10px #00ff88; }
-        .meta { color: #666; font-size: 0.9em; margin-top: 20px; }
-        /* 随机类名混淆 */
-        .box-$RAND_ID { padding: 20px; background: rgba(255,255,255,0.05); border-radius: 4px; margin-top: 30px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="status-bar"><span class="status-dot"></span>System Operational</div>
-        <h1>$RAND_CORP $RAND_TITLE</h1>
-        <p>Advanced WebTransport connectivity provided by V5 Protocol.</p>
-        <div class="box-$RAND_ID">
-            <p>Node ID: $RAND_ID</p>
-            <p>Latency: < 2ms (Internal)</p>
-            <p>Throughput: 10Gbps Optimized</p>
-        </div>
-        <div class="meta">&copy; $(date +%Y) $RAND_CORP Networks, Inc. All rights reserved.</div>
-    </div>
-</body>
-</html>
+            case $TEMPLATE_TYPE in
+                "sso")
+                    echo "Generating Enterprise SSO Portal..."
+                    cat > "$DEST_DIR/index.html" <<'EOF'
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Sign In - Enterprise Access</title><style>body{font-family:'Segoe UI',SanFrancisco,sans-serif;background:#f0f2f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}.card{background:#fff;padding:40px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);width:360px;text-align:center}.logo{width:64px;height:64px;background:#0078d4;border-radius:50%;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:32px;font-weight:bold}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}button{width:100%;padding:12px;background:#0078d4;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600}.error{color:#d93025;font-size:13px;margin:10px 0;display:none}</style><script>function login(){document.getElementById('err').style.display='block';setTimeout(()=>{document.getElementById('err').style.display='none'},3000)}</script></head><body><div class="card"><div class="logo">E</div><h2>Enterprise Access</h2><p style="color:#666;font-size:14px;margin-bottom:20px">Sign in with your organizational account</p><input type="email" placeholder="someone@example.com"><input type="password" placeholder="Password"><div id="err" class="error">Account temporarily locked. Please contact IT support.</div><button onclick="login()">Sign In</button><p style="margin-top:20px;font-size:12px;color:#999">&copy; 2024 Secure Identity Provider</p></div></body></html>
 EOF
-                echo -e "${GREEN}伪装站点部署完成 (多态指纹: $RAND_ID)${NC}"
-            fi
+                    ;;
+                "monitor")
+                    echo "Generating IT Monitor Dashboard..."
+                    cat > "$DEST_DIR/index.html" <<'EOF'
+<!DOCTYPE html><html><head><title>System Monitor - Node 8a2f</title><style>body{background:#111;color:#0f0;font-family:monospace;padding:20px}canvas{border:1px solid #333;width:100%;height:300px;background:#000}.stat{display:inline-block;width:30%;margin-right:2%;border:1px solid #333;padding:10px;margin-bottom:20px}h2{margin-top:0}</style></head><body><h1>System Status: OPERATIONAL</h1><div class="stat"><h2>CPU Load</h2><div id="cpu">0%</div></div><div class="stat"><h2>Memory</h2><div id="mem">0GB / 64GB</div></div><div class="stat"><h2>Network</h2><div id="net">0.0 Mb/s</div></div><canvas id="chart"></canvas><script>const ctx=document.getElementById('chart').getContext('2d');let data=new Array(100).fill(0);function draw(){ctx.clearRect(0,0,1000,300);ctx.beginPath();ctx.moveTo(0,150);data.forEach((v,i)=>{ctx.lineTo(i*10,150-v)});ctx.strokeStyle='#0f0';ctx.stroke();document.getElementById('cpu').innerText=Math.floor(Math.random()*20)+'%';document.getElementById('net').innerText=(Math.random()*50).toFixed(1)+' Mb/s';data.push(Math.random()*50);data.shift();requestAnimationFrame(draw)}draw();</script></body></html>
+EOF
+                    ;;
+                "nginx")
+                    echo "Generating Nginx 403 Page..."
+                    cat > "$DEST_DIR/index.html" <<'EOF'
+<!DOCTYPE html><html><head><title>403 Forbidden</title><style>body{width:35em;margin:0 auto;font-family:Tahoma,Verdana,Arial,sans-serif}h1{font-weight:normal;color:#444}hr{border:0;border-top:1px solid #eee}</style></head><body><h1>403 Forbidden</h1><p>You don't have permission to access this resource.</p><hr><address>nginx/1.18.0 (Ubuntu) Server at localhost Port 80</address></body></html>
+EOF
+                    ;;
+            esac
+            echo -e "${GREEN}伪装站点部署完成。${NC}"
         }
 
         case $DECOY_OPT in
-            1) setup_decoy "template_stream_v1" ;;
-            2) setup_decoy "template_cloud_v1" ;;
-            3) 
+            1) setup_decoy "sso" ;;
+            2) setup_decoy "monitor" ;;
+            3) setup_decoy "nginx" ;;
+            4) 
                 read -p "请输入 Git 仓库地址: " GIT_REPO
                 if [ -n "$GIT_REPO" ]; then
                     rm -rf deploy/decoy
@@ -285,7 +260,7 @@ EOF
                     echo -e "${GREEN}自定义站点已克隆。${NC}"
                 fi
                 ;;
-            4)
+            5)
                 read -p "请输入本地目录路径: " LOCAL_PATH
                 if [ -d "$LOCAL_PATH" ]; then
                    DECOY_PATH="$LOCAL_PATH"
@@ -297,41 +272,117 @@ EOF
             *) setup_decoy "default" ;;
         esac
 
-        # 证书生成逻辑：无论端口如何，如果没有证书，就生成
-        if [ ! -f "deploy/certs/server.crt" ]; then
-            echo -e "${YELLOW}正在生成 10 年期自签名证书...${NC}"
-            mkdir -p deploy/certs
-            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-                -keyout deploy/certs/server.key \
-                -out deploy/certs/server.crt \
-                -subj "/CN=$DOMAIN" &> /dev/null
-            TLS_CONFIG="/certs/server.crt /certs/server.key"
-            echo -e "${GREEN}自签名证书已生成。${NC}"
-        else
-            TLS_CONFIG="/certs/server.crt /certs/server.key"
-            echo -e "${GREEN}检测到现有证书，跳过生成。${NC}"
+
+        # 证书配置逻辑
+        echo -e "\n${YELLOW}配置 TLS 证书...${NC}"
+        echo "1) 自动生成自签名证书 (默认)"
+        echo "2) 使用 deploy/certs 目录下的证书"
+        echo "3) 指定宿主机绝对路径 (例如 /etc/letsencrypt/...)"
+        read -p "请选择 [1-3]: " CERT_OPT
+
+        HOST_CERT_PATH=""
+        HOST_KEY_PATH=""
+        CONTAINER_CERT_PATH="/certs/server.crt"
+        CONTAINER_KEY_PATH="/certs/server.key"
+
+        case $CERT_OPT in
+            2)
+                if [ -f "deploy/certs/server.crt" ] && [ -f "deploy/certs/server.key" ]; then
+                    echo -e "${GREEN}使用 deploy/certs 证书。${NC}"
+                else
+                    echo -e "${RED}未找到 deploy/certs 下的证书，将回退到自签名。${NC}"
+                    CERT_OPT=1
+                fi
+                ;;
+            3)
+                read -p "请输入证书文件绝对路径 (.crt/.pem): " HOST_CERT_PATH
+                read -p "请输入私钥文件绝对路径 (.key): " HOST_KEY_PATH
+                if [ -f "$HOST_CERT_PATH" ] && [ -f "$HOST_KEY_PATH" ]; then
+                    CONTAINER_CERT_PATH="/certs/custom.crt"
+                    CONTAINER_KEY_PATH="/certs/custom.key"
+                    echo -e "${GREEN}将挂载外部证书: $HOST_CERT_PATH${NC}"
+                else
+                    echo -e "${RED}文件不存在！将回退到自签名。${NC}"
+                    CERT_OPT=1
+                    HOST_CERT_PATH=""
+                    HOST_KEY_PATH=""
+                fi
+                ;;
+            *) CERT_OPT=1 ;;
+        esac
+
+        if [ "$CERT_OPT" = "1" ]; then
+            if [ ! -f "deploy/certs/server.crt" ]; then
+                echo -e "${YELLOW}正在生成 10 年期自签名证书...${NC}"
+                mkdir -p deploy/certs
+                openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                    -keyout deploy/certs/server.key \
+                    -out deploy/certs/server.crt \
+                    -subj "/CN=$DOMAIN" &> /dev/null
+                echo -e "${GREEN}自签名证书已生成。${NC}"
+            else
+                echo -e "${GREEN}检测到现有自签名证书，跳过生成。${NC}"
+            fi
         fi
 
     # 写入环境变量文件 (覆盖旧的配置)
     sed -i "/^CADDY_SITE_ADDRESS=/d" "$ENV_FILE"
     sed -i "/^CADDY_PORT=/d" "$ENV_FILE"
-    sed -i "/^TLS_CONFIG=/d" "$ENV_FILE"
     sed -i "/^DECOY_PATH=/d" "$ENV_FILE"
-    echo "CADDY_SITE_ADDRESS=$CADDY_SITE_ADDRESS" >> "$ENV_FILE"
-    echo "CADDY_PORT=${CADDY_PORT:-8080}" >> "$ENV_FILE"
-    echo "TLS_CONFIG=$TLS_CONFIG" >> "$ENV_FILE"
-    echo "DECOY_PATH=${DECOY_PATH:-deploy/decoy}" >> "$ENV_FILE"
-    
-    # 路径对齐：确保后端能找到证书
+    sed -i "/^HOST_CERT_PATH=/d" "$ENV_FILE"
+    sed -i "/^HOST_KEY_PATH=/d" "$ENV_FILE"
     sed -i "/^CERT_FILE=/d" "$ENV_FILE"
     sed -i "/^KEY_FILE=/d" "$ENV_FILE"
-    if [ -f "deploy/certs/server.crt" ]; then
-        echo "CERT_FILE=/certs/server.crt" >> "$ENV_FILE"
-        echo "KEY_FILE=/certs/server.key" >> "$ENV_FILE"
+
+    echo "CADDY_SITE_ADDRESS=$CADDY_SITE_ADDRESS" >> "$ENV_FILE"
+    echo "CADDY_PORT=${CADDY_PORT:-8080}" >> "$ENV_FILE"
+    echo "DECOY_PATH=${DECOY_PATH:-deploy/decoy}" >> "$ENV_FILE"
+    # 保存绝对路径供 compose 使用
+    echo "HOST_CERT_PATH=$HOST_CERT_PATH" >> "$ENV_FILE"
+    echo "HOST_KEY_PATH=$HOST_KEY_PATH" >> "$ENV_FILE"
+    # 保存容器内路径供 APP 使用
+    echo "CERT_FILE=$CONTAINER_CERT_PATH" >> "$ENV_FILE"
+    echo "KEY_FILE=$CONTAINER_KEY_PATH" >> "$ENV_FILE"
+    
+    # 生成 Docker Compose 配置
+    echo -e "${YELLOW}生成 Docker Compose 配置...${NC}"
+    
+    # 根据是否使用外部证书决定挂载卷配置
+    if [ -n "$HOST_CERT_PATH" ] && [ -n "$HOST_KEY_PATH" ]; then
+        VOLUME_CONFIG="
+      - ${HOST_CERT_PATH}:/certs/custom.crt:ro
+      - ${HOST_KEY_PATH}:/certs/custom.key:ro
+      - ${DECOY_PATH:-deploy/decoy}:/decoy:ro"
     else
-        echo "CERT_FILE=" >> "$ENV_FILE"
-        echo "KEY_FILE=" >> "$ENV_FILE"
+        VOLUME_CONFIG="
+      - ./certs:/certs:ro
+      - ${DECOY_PATH:-deploy/decoy}:/decoy:ro"
     fi
+
+    cat > deploy/docker-compose.yml <<EOF
+services:
+  aether-gateway-core:
+    image: ghcr.io/coolapijust/aether-realist:main
+    container_name: aether-gateway-core
+    restart: always
+    network_mode: "host"
+    sysctls:
+      - net.core.rmem_max=2500000
+      - net.core.wmem_max=2500000
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro$VOLUME_CONFIG
+    environment:
+      - PSK=\${PSK}
+      - LISTEN_ADDR=:\${CADDY_PORT}
+      - SSL_CERT_FILE=\${CERT_FILE:-/certs/server.crt}
+      - SSL_KEY_FILE=\${KEY_FILE:-/certs/server.key}
+      - DECOY_ROOT=/decoy
+      - WINDOW_PROFILE=\${WINDOW_PROFILE:-normal}
+      - RECORD_PAYLOAD_BYTES=\${RECORD_PAYLOAD_BYTES:-16384}
+    cap_add:
+      - NET_ADMIN
+EOF
 
     cleanup_legacy() {
         echo -e "\n${YELLOW}正在准备无缝升级 (环境检查)...${NC}"

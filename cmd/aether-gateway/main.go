@@ -253,30 +253,23 @@ func main() {
 			}
 		}
 
-		// Fallback to simple built-in decoy
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(`<!DOCTYPE html>
-<html>
-<head>
-    <title>API Gateway Service</title>
-    <style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.6;color:#333}h1{border-bottom:1px solid #eaeaea;padding-bottom:10px}.status{display:inline-block;padding:5px 10px;background:#e1f5fe;color:#0277bd;border-radius:4px;font-size:14px}pre{background:#f6f8fa;padding:15px;border-radius:6px;overflow-x:auto}</style>
-</head>
-<body>
-    <h1>API Gateway Service</h1>
-    <p><span class="status">System Operational</span></p>
-    <p>This is a secure API gateway endpoint. Unauthorized access is monitored.</p>
-    <h3>Endpoint Status</h3>
-    <ul>
-        <li><strong>Sync Service:</strong> <span style="color:green">Active</span></li>
-        <li><strong>Discovery:</strong> <span style="color:orange">Restricted</span></li>
-    </ul>
-    <p>For API documentation, please refer to the internal developer portal.</p>
-    <footer>&copy; 2024 API Gateway System v2.1.0</footer>
+		// Fallback: Nginx 403 Forbidden Simulation
+		// CRITICAL: Align Status Code and Headers to prevent fingerprinting
+		w.Header().Set("Server", "nginx/1.18.0 (Ubuntu)")
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`<html>
+<head><title>403 Forbidden</title></head>
+<body bgcolor="white">
+<center><h1>403 Forbidden</h1></center>
+<hr><center>nginx/1.18.0 (Ubuntu)</center>
 </body>
 </html>`))
 	})
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Health check must return 200 OK for load balancers
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
