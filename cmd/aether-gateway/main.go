@@ -200,7 +200,7 @@ func main() {
 	}
 
 	server := webtransport.Server{
-		H3: http3.Server{
+		H3: &http3.Server{
 			Addr:       *listenAddr,
 			TLSConfig:  tlsConfig,
 			QUICConfig: quicConfig,
@@ -223,7 +223,7 @@ func main() {
 			return
 		}
 
-		state := session.ConnectionState().TLS
+		state := session.SessionState().ConnectionState.TLS
 		log.Printf("[INFO] WebTransport session upgraded for %s (ALPN: %s)", r.RemoteAddr, state.NegotiatedProtocol)
 		// V5: Create NonceGenerator per session for counter-based nonce
 		ng, err := core.NewNonceGenerator()
@@ -343,6 +343,7 @@ func main() {
 // V5: Uses NonceGenerator for counter-based nonce instead of ReplayCache.
 func handleSession(session *webtransport.Session, psk string, ng *core.NonceGenerator) {
 	log.Println("New session established")
+	var streamID uint64
 
 	for {
 		stream, err := session.AcceptStream(context.Background())
@@ -351,14 +352,14 @@ func handleSession(session *webtransport.Session, psk string, ng *core.NonceGene
 			break
 		}
 
-		id := uint64(stream.StreamID())
-		go handleStream(stream, psk, id, ng)
+		streamID++
+		go handleStream(stream, psk, streamID, ng)
 	}
 }
 
 // handleStream processes a single bidirectional stream.
 // V5: Uses counter-based anti-replay with per-stream lastCounter tracking.
-func handleStream(stream webtransport.Stream, psk string, streamID uint64, ng *core.NonceGenerator) {
+func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *core.NonceGenerator) {
 	defer stream.Close()
 
 	reader := core.NewRecordReader(stream)
@@ -499,7 +500,7 @@ func writeError(w io.Writer, code uint16, msg string, ng *core.NonceGenerator) {
 	w.Write(record)
 }
 
-func handleHandshakeFailure(stream webtransport.Stream, streamID uint64, reason string) {
+func handleHandshakeFailure(stream *webtransport.Stream, streamID uint64, reason string) {
 	log.Printf("[SECURITY] [Stream %d] %s", streamID, reason)
 	time.Sleep(jitterDuration(100*time.Millisecond, 1000*time.Millisecond))
 	decoyLen, err := randomIntRange(32, 128)
