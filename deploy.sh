@@ -493,16 +493,28 @@ stop_service() {
 }
 
 remove_service() {
-    echo -e "\n${YELLOW}正在极其彻底地清理旧环境...${NC}"
+    echo -e "\n${YELLOW}正在准备卸载 Aether-Realist 服务...${NC}"
+    
+    # 1. 基础清理：停止并删除容器 (保留数据)
     if [ -f "deploy/docker-compose.yml" ]; then
         docker compose -f deploy/docker-compose.yml down -v
-        echo -e "${GREEN}Docker 容器与网络已清理。${NC}"
+        echo -e "${GREEN}[OK] Docker 容器、网络与临时卷已清理。${NC}"
+        echo -e "${YELLOW}提示: 您的配置文件 (.env) 和证书目录 (certs/) 仍然保留，方便下次快速重新部署。${NC}"
+    else
+         echo -e "${YELLOW}[SKIP] 未找到 docker-compose.yml，跳过容器清理。${NC}"
     fi
-    # 清理旧的伪装目录与证书缓存
-    read -p "是否同时清理证书与伪装站点缓存? [y/N]: " CLEAN_CACHE
-    if [[ "$CLEAN_CACHE" =~ ^[Yy]$ ]]; then
-        rm -rf deploy/certs deploy/decoy
-        echo -e "${GREEN}证书与伪装站缓存已清空。${NC}"
+
+    # 2. 彻底清除选项 (可选)
+    echo -e "\n${RED}!!! 危险操作警告 !!!${NC}"
+    read -p "是否【彻底粉碎】所有数据? (包括域名配置、PSK密钥、SSL证书)? [y/N]: " DESTROY_ALL
+    if [[ "$DESTROY_ALL" =~ ^[Yy]$ ]]; then
+        echo -e "${RED}正在执行深度清理...${NC}"
+        rm -rf deploy/certs deploy/decoy deploy/.env
+        # 也尝试删除 deploy 目录本身（如果为空）
+        rmdir deploy 2>/dev/null
+        echo -e "${GREEN}[OK] 所有配置与数据已永久删除。环境已重置为初始状态。${NC}"
+    else
+        echo -e "${GREEN}[INFO] 已保留配置文件，您可以随时运行 ./deploy.sh 恢复服务。${NC}"
     fi
 }
 
