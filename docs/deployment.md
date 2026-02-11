@@ -171,27 +171,57 @@ docker compose -f deploy/docker-compose.yml up -d --force-recreate
 
 ---
  
- ## 4. 性能调优 (Kernel Tuning)
- 
- 为了在高延迟长距离链路中跑满带宽（BDP 适配），务必对 Linux 内核参数进行优化。
- 
- ### 推荐 sysctl 配置
- 在 `/etc/sysctl.conf` 中添加以下内容并执行 `sysctl -p`：
- 
- ```bash
- # 开启 BBR 拥塞控制
- net.core.default_qdisc = fq
- net.ipv4.tcp_congestion_control = bbr
- 
- # 增大 UDP 缓冲区上限 (关键优化 for QUIC)
- # 16MB 缓冲区足以支撑 1Gbps @ 200ms RTT
- net.core.rmem_max = 16777216
- net.core.wmem_max = 16777216
- net.core.rmem_default = 16777216
- net.core.wmem_default = 16777216
- ```
- 
- > **注意**：如果不调整此参数，当下载速度超过 50MB/s 时可能会观察到丢包导致的吞吐量剧烈波动。
+ ## 4. VPS 选型与深度性能调优 (Advanced Performance)
+
+为了在高延迟长距离链路中跑满带宽（BDP 适配），并确保 WebTransport 协议的稳定性，建议参考以下配置与优化方案。
+
+### 4.1 硬件配置推荐
+
+| 类型 | 场景 | CPU | 内存 | 带宽 |
+| :--- | :--- | :--- | :--- | :--- |
+| **基础型** | 个人日常 / 网页浏览 | 1 vCPU (AMD/Intel) | 512MB+ | 100Mbps+ |
+| **进阶型** | 4K 串流 / 小团队 | 2 vCPU | 2GB+ | 500Mbps+ (CN2 GIA/9929) |
+| **性能型** | 高并发 / 极低延迟 | 4 vCPU+ | 4GB+ | 1Gbps+ 独享 |
+
+> **内存警告**：建议至少 1GB 内存。512MB 机器在高并发下可能因 OOM (Out of Memory) 导致断流。
+
+### 4.2 操作系统选择
+*   **首选**: Debian 11 / 12 (内核较新，对 QUIC 支持佳，系统占用低)
+*   **次选**: Ubuntu 22.04 LTS
+*   **不推荐**: CentOS 7 (内核过旧，严重制约 UDP/QUIC 性能)
+
+### 4.3 关键系统优化 (sysctl)
+Aether V5 基于 UDP 协议，必须优化 Linux 内核参数以获得最佳吞吐量。请在 `/etc/sysctl.conf` 中添加：
+
+```bash
+# 开启 BBR 拥塞控制 (显著改善丢包环境速度)
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+# 增大 UDP 缓冲区上限 (解决 QUIC 吞吐瓶颈)
+# 建议设置 16MB - 32MB 以支撑 1Gbps+
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.core.rmem_default = 8388608
+net.core.wmem_default = 8388608
+
+# 优化 UDP 发包效率
+net.ipv4.udp_rmem_min = 16384
+net.ipv4.udp_wmem_min = 16384
+```
+应用配置：`sysctl -p`
+
+### 4.4 文件描述符与并发限制
+高并发场景下，默认的文件描述符限制（通常为 1024）可能成为瓶颈。
+
+编辑 `/etc/security/limits.conf`，添加：
+```text
+* soft nofile 51200
+* hard nofile 51200
+root soft nofile 51200
+root hard nofile 51200
+```
+*需重启服务器生效*。
  
  ---
  
