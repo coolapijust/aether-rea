@@ -188,6 +188,7 @@ func main() {
 
 	quicConfig := &quic.Config{
 		EnableDatagrams:                true,
+		EnableStreamResetPartialDelivery: true,
 		MaxIdleTimeout:                 30 * time.Second,
 		KeepAlivePeriod:                10 * time.Second,
 		Allow0RTT:                      true,
@@ -634,3 +635,4 @@ func (l *CertificateLoader) GetCertificate(clientHello *tls.ClientHelloInfo) (*t
 	defer l.mu.RUnlock()
 	return l.cert, nil
 }
+

@@ -104,6 +104,7 @@ func (sm *sessionManager) initialize() error {
 		KeepAlivePeriod:                20 * time.Second,
 		MaxIdleTimeout:                 60 * time.Second,
 		EnableDatagrams:                true,
+		EnableStreamResetPartialDelivery: true,
 		Allow0RTT:                      true,
 		MaxIncomingStreams:             1000,
 		InitialStreamReceiveWindow:     streamWin,
@@ -438,3 +439,4 @@ func jitterDuration(min, max time.Duration) time.Duration {
 	diff := max - min
 	return min + time.Duration(rand.Int63n(int64(diff)+1))
 }
+

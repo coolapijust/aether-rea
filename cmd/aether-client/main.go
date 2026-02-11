@@ -203,6 +203,7 @@ func newSessionManager(opts clientOptions) (*sessionManager, error) {
 		KeepAlivePeriod: 20 * time.Second,
 		MaxIdleTimeout:  60 * time.Second,
 		EnableDatagrams: true,
+		EnableStreamResetPartialDelivery: true,
 	}
 
 	dialer := &webtransport.Dialer{
@@ -756,3 +757,4 @@ func (t *tlsConfig) toTLSConfig() *tls.Config {
 		NextProtos:         []string{http3.NextProtoH3},
 	}
 }
+
