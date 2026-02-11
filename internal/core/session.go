@@ -73,7 +73,7 @@ func (sm *sessionManager) initialize() error {
 	}
 
 	// V5.1 Optimization: Multi-tiered Flow Control Windows
-	var streamWin, connWin, maxStreamWin, maxConnWin int64
+	var streamWin, connWin, maxStreamWin, maxConnWin uint64
 	profile := sm.config.WindowProfile
 	switch profile {
 	case "conservative":
