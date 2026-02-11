@@ -150,7 +150,7 @@ func main() {
 	}
 
 	// V5.1 Optimization: Multi-tiered Flow Control Windows
-	var streamWin, connWin, maxStreamWin, maxConnWin int64
+	var streamWin, connWin, maxStreamWin, maxConnWin uint64
 	profile := os.Getenv("WINDOW_PROFILE")
 	switch profile {
 	case "conservative":
