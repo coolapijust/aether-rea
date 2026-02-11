@@ -374,9 +374,6 @@ services:
     container_name: aether-gateway-core
     restart: always
     network_mode: "host"
-    sysctls:
-      - net.core.rmem_max=2500000
-      - net.core.wmem_max=2500000
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro$VOLUME_CONFIG
