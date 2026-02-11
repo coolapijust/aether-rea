@@ -186,7 +186,7 @@ func main() {
 			return
 		}
 
-		state := session.ConnectionState().TLS.ConnectionState
+		state := session.ConnectionState().TLS
 		log.Printf("[INFO] WebTransport session upgraded for %s (ALPN: %s)", r.RemoteAddr, state.NegotiatedProtocol)
 		// V5: Create NonceGenerator per session for counter-based nonce
 		ng, err := core.NewNonceGenerator()
