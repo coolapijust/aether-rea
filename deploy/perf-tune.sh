@@ -75,6 +75,7 @@ apply_preset_env_only() {
       set_or_clear_env "QUIC_INITIAL_CONN_RECV_WINDOW" ""
       set_or_clear_env "QUIC_MAX_STREAM_RECV_WINDOW" ""
       set_or_clear_env "QUIC_MAX_CONN_RECV_WINDOW" ""
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       ;;
@@ -83,6 +84,7 @@ apply_preset_env_only() {
       set_or_clear_env "QUIC_INITIAL_CONN_RECV_WINDOW" ""
       set_or_clear_env "QUIC_MAX_STREAM_RECV_WINDOW" ""
       set_or_clear_env "QUIC_MAX_CONN_RECV_WINDOW" ""
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
       # Keep baseline windows, add mild downlink smoothing knobs.
       set_env "TCP_TO_WT_COALESCE_MS" "8"
       set_env "TCP_TO_WT_FLUSH_THRESHOLD" "32768"
@@ -92,6 +94,7 @@ apply_preset_env_only() {
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "12582912"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "50331648"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "67108864"
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       ;;
@@ -100,6 +103,7 @@ apply_preset_env_only() {
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "16777216"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "67108864"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "100663296"
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       ;;
@@ -108,6 +112,7 @@ apply_preset_env_only() {
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "20971520"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "100663296"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "134217728"
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       ;;
@@ -122,7 +127,7 @@ apply_preset_env_only() {
 show_status() {
   ensure_env_file
   echo "=== PERF/QUIC current env ==="
-  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW|TCP_TO_WT_COALESCE_MS|TCP_TO_WT_FLUSH_THRESHOLD)=" "$ENV_FILE" || true
+  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW|TCP_TO_WT_ADAPTIVE|TCP_TO_WT_COALESCE_MS|TCP_TO_WT_FLUSH_THRESHOLD)=" "$ENV_FILE" || true
 }
 
 apply_preset() {

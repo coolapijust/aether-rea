@@ -628,6 +628,63 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 				flushThreshold = parsed
 			}
 		}
+		adaptiveEnabled := true
+		if v := os.Getenv("TCP_TO_WT_ADAPTIVE"); v != "" {
+			adaptiveEnabled = v == "1" || strings.EqualFold(v, "true")
+		}
+		const (
+			minCoalesceWait = 2 * time.Millisecond
+			maxCoalesceWait = 40 * time.Millisecond
+		)
+		minFlushThreshold := 4096
+		maxFlushThreshold := maxPayload * 2
+		if maxFlushThreshold > core.MaxRecordSize-core.RecordHeaderLength {
+			maxFlushThreshold = core.MaxRecordSize - core.RecordHeaderLength
+		}
+		adjustAdaptive := func(writeDur time.Duration, chunkSize int) {
+			if !adaptiveEnabled {
+				return
+			}
+			writeUs := float64(writeDur.Nanoseconds()) / 1000.0
+			switch {
+			case writeUs > 12000:
+				if coalesceWait < maxCoalesceWait {
+					coalesceWait += 2 * time.Millisecond
+					if coalesceWait > maxCoalesceWait {
+						coalesceWait = maxCoalesceWait
+					}
+				}
+				if flushThreshold < maxFlushThreshold {
+					flushThreshold += 1024
+					if flushThreshold > maxFlushThreshold {
+						flushThreshold = maxFlushThreshold
+					}
+				}
+			case writeUs < 3000:
+				// If writes are fast but chunks are tiny, aggregate a bit more.
+				if chunkSize < maxPayload/2 {
+					if coalesceWait < maxCoalesceWait {
+						coalesceWait += 1 * time.Millisecond
+						if coalesceWait > maxCoalesceWait {
+							coalesceWait = maxCoalesceWait
+						}
+					}
+				} else {
+					if coalesceWait > minCoalesceWait {
+						coalesceWait -= 1 * time.Millisecond
+						if coalesceWait < minCoalesceWait {
+							coalesceWait = minCoalesceWait
+						}
+					}
+				}
+				if flushThreshold > minFlushThreshold && chunkSize >= flushThreshold/2 {
+					flushThreshold -= 512
+					if flushThreshold < minFlushThreshold {
+						flushThreshold = minFlushThreshold
+					}
+				}
+			}
+		}
 		pending := make([]byte, 0, maxPayload*2)
 
 		flushPending := func() error {
@@ -649,7 +706,9 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 					core.PutBuffer(recordBytes)
 					return wErr
 				}
-				gwPerf.observeTCPToWT(len(recordBytes), time.Since(writeStart))
+				writeDur := time.Since(writeStart)
+				gwPerf.observeTCPToWT(len(recordBytes), writeDur)
+				adjustAdaptive(writeDur, chunkSize)
 				core.PutBuffer(recordBytes)
 				pending = pending[chunkSize:]
 			}
