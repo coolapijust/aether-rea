@@ -637,7 +637,49 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 
 	// TCP -> WebTransport
 	go func() {
-		buf := make([]byte, 512*1024)
+		type tcpToWTChunk struct {
+			data []byte
+			err  error
+		}
+		readBuf := make([]byte, 512*1024)
+		queueSize := 256
+		if v := os.Getenv("TCP_TO_WT_QUEUE_SIZE"); v != "" {
+			if parsed, pErr := strconv.Atoi(v); pErr == nil && parsed >= 16 && parsed <= 4096 {
+				queueSize = parsed
+			}
+		}
+		chunkCh := make(chan tcpToWTChunk, queueSize)
+		stageCtx, stageCancel := context.WithCancel(context.Background())
+		defer stageCancel()
+
+		// Stage A: read from TCP continuously and enqueue chunks.
+		go func() {
+			defer close(chunkCh)
+			for {
+				readStart := time.Now()
+				n, err := conn.Read(readBuf)
+				gwPerf.observeTCPReadWait(time.Since(readStart))
+
+				if n > 0 {
+					chunk := make([]byte, n)
+					copy(chunk, readBuf[:n])
+					select {
+					case chunkCh <- tcpToWTChunk{data: chunk}:
+					case <-stageCtx.Done():
+						return
+					}
+				}
+
+				if err != nil {
+					select {
+					case chunkCh <- tcpToWTChunk{err: err}:
+					case <-stageCtx.Done():
+					}
+					return
+				}
+			}
+		}()
+
 		maxPayload := core.GetMaxRecordPayload()
 		coalesceWait := 5 * time.Millisecond
 		if v := os.Getenv("TCP_TO_WT_COALESCE_MS"); v != "" {
@@ -720,6 +762,15 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 			}
 		}
 		pending := make([]byte, 0, maxPayload*2)
+		flushTimer := time.NewTimer(time.Hour)
+		if !flushTimer.Stop() {
+			select {
+			case <-flushTimer.C:
+			default:
+			}
+		}
+		timerArmed := false
+		var readErr error
 
 		flushPending := func() error {
 			for len(pending) > 0 {
@@ -755,50 +806,86 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 			return nil
 		}
 
-		for {
-			if len(pending) > 0 {
-				_ = conn.SetReadDeadline(time.Now().Add(coalesceWait))
-			} else {
-				_ = conn.SetReadDeadline(time.Time{})
-			}
-			readStart := time.Now()
-			n, err := conn.Read(buf)
-			gwPerf.observeTCPReadWait(time.Since(readStart))
-			if n > 0 {
-				pending = append(pending, buf[:n]...)
-				if len(pending) >= flushThreshold {
-					if fErr := flushPending(); fErr != nil {
-						errCh <- fErr
-						return
+		resetFlushTimer := func() {
+			if timerArmed {
+				if !flushTimer.Stop() {
+					select {
+					case <-flushTimer.C:
+					default:
 					}
 				}
 			}
-			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			flushTimer.Reset(coalesceWait)
+			timerArmed = true
+		}
+
+		stopFlushTimer := func() {
+			if !timerArmed {
+				return
+			}
+			if !flushTimer.Stop() {
+				select {
+				case <-flushTimer.C:
+				default:
+				}
+			}
+			timerArmed = false
+		}
+
+		for {
+			if len(pending) > 0 && !timerArmed {
+				resetFlushTimer()
+			}
+			select {
+			case item, ok := <-chunkCh:
+				if !ok {
+					stopFlushTimer()
 					if len(pending) > 0 {
 						if fErr := flushPending(); fErr != nil {
 							errCh <- fErr
 							return
 						}
 					}
+					if readErr != nil && readErr != io.EOF {
+						// Ignore "use of closed network connection" if caused by other side closing
+						if !strings.Contains(readErr.Error(), "closed network connection") {
+							errCh <- readErr
+						} else {
+							errCh <- nil
+						}
+					} else {
+						errCh <- nil
+					}
+					return
+				}
+
+				if item.err != nil {
+					readErr = item.err
 					continue
 				}
+				if len(item.data) == 0 {
+					continue
+				}
+
+				pending = append(pending, item.data...)
+				if len(pending) >= flushThreshold {
+					stopFlushTimer()
+					if fErr := flushPending(); fErr != nil {
+						errCh <- fErr
+						return
+					}
+				} else {
+					resetFlushTimer()
+				}
+			case <-flushTimer.C:
+				timerArmed = false
 				if len(pending) > 0 {
 					if fErr := flushPending(); fErr != nil {
 						errCh <- fErr
 						return
 					}
 				}
-				if err != io.EOF {
-					// Ignore "use of closed network connection" if caused by other side closing
-					if !strings.Contains(err.Error(), "closed network connection") {
-						errCh <- err
-					} else {
-						errCh <- nil
-					}
-				} else {
-					errCh <- nil
-				}
+			case <-stageCtx.Done():
 				return
 			}
 		}
