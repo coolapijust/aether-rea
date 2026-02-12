@@ -161,6 +161,7 @@ func (c *Core) Start(config SessionConfig) error {
 	c.mu.Lock()
 	c.config = &config
 	c.mu.Unlock()
+	SetPerfDiagEnabled(config.PerfCaptureEnabled)
 	
 	if err := c.stateMachine.Transition(StateStarting); err != nil {
 		return err
@@ -328,6 +329,7 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 	addressChanged := oldListenAddr != "" && (oldListenAddr != config.ListenAddr || oldHttpAddr != config.HttpProxyAddr)
 	needsProxyRefresh := c.systemProxyEnabled && oldListenAddr != config.ListenAddr
 	c.mu.Unlock()
+	SetPerfDiagEnabled(config.PerfCaptureEnabled)
 	
 	if needsProxyRefresh {
 		c.SetSystemProxy(true)
