@@ -23,6 +23,7 @@ services:
       - TCP_TO_WT_ADAPTIVE=${TCP_TO_WT_ADAPTIVE:-1}
       - TCP_TO_WT_COALESCE_MS=${TCP_TO_WT_COALESCE_MS:-}
       - TCP_TO_WT_FLUSH_THRESHOLD=${TCP_TO_WT_FLUSH_THRESHOLD:-}
+      - TCP_TO_WT_QUEUE_SIZE=${TCP_TO_WT_QUEUE_SIZE:-256}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

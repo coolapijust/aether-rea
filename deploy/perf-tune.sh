@@ -19,6 +19,7 @@ Usage:
 Presets:
   baseline    Follow WINDOW_PROFILE only (clear QUIC_* overrides)
   baseline-smooth  baseline + TCP->WT coalescing knobs
+  dl-queue-fixed  Disable adaptive, fixed queue/coalesce/flush for A/B validation
   dl-a        Tuned for downlink test A (6/12/48/64 MB windows)
   dl-b        Tuned for downlink test B (8/16/64/96 MB windows)
   dl-c        Tuned for downlink test C (10/20/96/128 MB windows)
@@ -26,6 +27,7 @@ Presets:
 Examples:
   ./deploy/perf-tune.sh apply baseline 16384
   ./deploy/perf-tune.sh apply baseline-smooth 16384
+  ./deploy/perf-tune.sh apply dl-queue-fixed 16384
   ./deploy/perf-tune.sh apply dl-a 16384
   ./deploy/perf-tune.sh logs 120
   ./deploy/perf-tune.sh run     # schedules background capture; survives SSH disconnect
@@ -78,6 +80,7 @@ apply_preset_env_only() {
       set_env "TCP_TO_WT_ADAPTIVE" "1"
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
       ;;
     baseline-smooth)
       set_or_clear_env "QUIC_INITIAL_STREAM_RECV_WINDOW" ""
@@ -88,6 +91,17 @@ apply_preset_env_only() {
       # Keep baseline windows, add mild downlink smoothing knobs.
       set_env "TCP_TO_WT_COALESCE_MS" "8"
       set_env "TCP_TO_WT_FLUSH_THRESHOLD" "32768"
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      ;;
+    dl-queue-fixed)
+      set_or_clear_env "QUIC_INITIAL_STREAM_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_INITIAL_CONN_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_MAX_STREAM_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_MAX_CONN_RECV_WINDOW" ""
+      set_env "TCP_TO_WT_ADAPTIVE" "0"
+      set_env "TCP_TO_WT_COALESCE_MS" "8"
+      set_env "TCP_TO_WT_FLUSH_THRESHOLD" "12288"
+      set_env "TCP_TO_WT_QUEUE_SIZE" "256"
       ;;
     dl-a)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "6291456"
@@ -97,6 +111,7 @@ apply_preset_env_only() {
       set_env "TCP_TO_WT_ADAPTIVE" "1"
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
       ;;
     dl-b)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "8388608"
@@ -106,6 +121,7 @@ apply_preset_env_only() {
       set_env "TCP_TO_WT_ADAPTIVE" "1"
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
       ;;
     dl-c)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "10485760"
@@ -115,6 +131,7 @@ apply_preset_env_only() {
       set_env "TCP_TO_WT_ADAPTIVE" "1"
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
       ;;
     *)
       echo "ERROR: unknown preset '$preset'"
@@ -127,7 +144,7 @@ apply_preset_env_only() {
 show_status() {
   ensure_env_file
   echo "=== PERF/QUIC current env ==="
-  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW|TCP_TO_WT_ADAPTIVE|TCP_TO_WT_COALESCE_MS|TCP_TO_WT_FLUSH_THRESHOLD)=" "$ENV_FILE" || true
+  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW|TCP_TO_WT_ADAPTIVE|TCP_TO_WT_COALESCE_MS|TCP_TO_WT_FLUSH_THRESHOLD|TCP_TO_WT_QUEUE_SIZE)=" "$ENV_FILE" || true
 }
 
 apply_preset() {
@@ -171,17 +188,19 @@ run_interactive_once() {
   echo "Select test group:"
   echo "1) baseline"
   echo "2) baseline-smooth"
-  echo "3) dl-a"
-  echo "4) dl-b"
-  echo "5) dl-c"
-  read -rp "Choice [1-5, default 1]: " choice
+  echo "3) dl-queue-fixed"
+  echo "4) dl-a"
+  echo "5) dl-b"
+  echo "6) dl-c"
+  read -rp "Choice [1-6, default 1]: " choice
 
   case "$choice" in
     ""|1) preset="baseline" ;;
     2) preset="baseline-smooth" ;;
-    3) preset="dl-a" ;;
-    4) preset="dl-b" ;;
-    5) preset="dl-c" ;;
+    3) preset="dl-queue-fixed" ;;
+    4) preset="dl-a" ;;
+    5) preset="dl-b" ;;
+    6) preset="dl-c" ;;
     *)
       echo "ERROR: invalid choice"
       exit 1
@@ -368,9 +387,10 @@ matrix_plan() {
   cat <<'EOF'
 Recommended matrix order:
 1) ./deploy/perf-tune.sh apply baseline 16384
-2) ./deploy/perf-tune.sh apply dl-a 16384
-3) ./deploy/perf-tune.sh apply dl-b 16384
-4) ./deploy/perf-tune.sh apply dl-c 16384
+2) ./deploy/perf-tune.sh apply dl-queue-fixed 16384
+3) ./deploy/perf-tune.sh apply dl-a 16384
+4) ./deploy/perf-tune.sh apply dl-b 16384
+5) ./deploy/perf-tune.sh apply dl-c 16384
 
 For each step:
 1) Run 3 rounds of speed test
