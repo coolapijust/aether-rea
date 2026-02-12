@@ -26,21 +26,22 @@ download_file() {
     local FILE_PATH=$1
     local FORCE_UPDATE=$2
     local URL="$GITHUB_RAW_BASE/$FILE_PATH"
-    
-    if [ -f "$FILE_PATH" ] && [ "$FORCE_UPDATE" = "true" ]; then
-        # 如果是强制更新且文件已存在，先备份
-        mv "$FILE_PATH" "${FILE_PATH}.bak"
-        echo -e "已备份旧的 ${YELLOW}$FILE_PATH${NC} 为 ${YELLOW}${FILE_PATH}.bak${NC}"
+
+    # 历史版本可能遗留 .bak，统一清理，避免误导。
+    if [ -f "${FILE_PATH}.bak" ]; then
+        rm -f "${FILE_PATH}.bak"
     fi
 
-    
+    # 强制更新时直接删除旧文件，不再创建备份。
+    if [ -f "$FILE_PATH" ] && [ "$FORCE_UPDATE" = "true" ]; then
+        rm -f "$FILE_PATH"
+    fi
+
     if [ ! -f "$FILE_PATH" ]; then
         echo -e "正在从 GitHub 获取/更新 ${YELLOW}$FILE_PATH${NC}..."
         mkdir -p "$(dirname "$FILE_PATH")"
         if ! curl -sL "$URL?$(date +%s)" -o "$FILE_PATH"; then
              echo -e "${RED}错误: 下载 $FILE_PATH 失败，请检查网络。${NC}"
-             # 如果下载失败且有备份，还原备份
-             [ -f "${FILE_PATH}.bak" ] && mv "${FILE_PATH}.bak" "$FILE_PATH"
              exit 1
         fi
     fi
