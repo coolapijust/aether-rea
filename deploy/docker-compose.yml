@@ -20,6 +20,8 @@ services:
       - QUIC_INITIAL_CONN_RECV_WINDOW=${QUIC_INITIAL_CONN_RECV_WINDOW:-}
       - QUIC_MAX_STREAM_RECV_WINDOW=${QUIC_MAX_STREAM_RECV_WINDOW:-}
       - QUIC_MAX_CONN_RECV_WINDOW=${QUIC_MAX_CONN_RECV_WINDOW:-}
+      - TCP_TO_WT_COALESCE_MS=${TCP_TO_WT_COALESCE_MS:-}
+      - TCP_TO_WT_FLUSH_THRESHOLD=${TCP_TO_WT_FLUSH_THRESHOLD:-}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

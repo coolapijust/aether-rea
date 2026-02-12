@@ -18,12 +18,14 @@ Usage:
 
 Presets:
   baseline    Follow WINDOW_PROFILE only (clear QUIC_* overrides)
+  baseline-smooth  baseline + TCP->WT coalescing knobs
   dl-a        Tuned for downlink test A (6/12/48/64 MB windows)
   dl-b        Tuned for downlink test B (8/16/64/96 MB windows)
   dl-c        Tuned for downlink test C (10/20/96/128 MB windows)
 
 Examples:
   ./deploy/perf-tune.sh apply baseline 16384
+  ./deploy/perf-tune.sh apply baseline-smooth 16384
   ./deploy/perf-tune.sh apply dl-a 16384
   ./deploy/perf-tune.sh logs 120
   ./deploy/perf-tune.sh run     # schedules background capture; survives SSH disconnect
@@ -73,24 +75,41 @@ apply_preset_env_only() {
       set_or_clear_env "QUIC_INITIAL_CONN_RECV_WINDOW" ""
       set_or_clear_env "QUIC_MAX_STREAM_RECV_WINDOW" ""
       set_or_clear_env "QUIC_MAX_CONN_RECV_WINDOW" ""
+      set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
+      set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      ;;
+    baseline-smooth)
+      set_or_clear_env "QUIC_INITIAL_STREAM_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_INITIAL_CONN_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_MAX_STREAM_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_MAX_CONN_RECV_WINDOW" ""
+      # Keep baseline windows, add mild downlink smoothing knobs.
+      set_env "TCP_TO_WT_COALESCE_MS" "8"
+      set_env "TCP_TO_WT_FLUSH_THRESHOLD" "32768"
       ;;
     dl-a)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "6291456"
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "12582912"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "50331648"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "67108864"
+      set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
+      set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       ;;
     dl-b)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "8388608"
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "16777216"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "67108864"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "100663296"
+      set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
+      set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       ;;
     dl-c)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "10485760"
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "20971520"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "100663296"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "134217728"
+      set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
+      set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       ;;
     *)
       echo "ERROR: unknown preset '$preset'"
@@ -103,7 +122,7 @@ apply_preset_env_only() {
 show_status() {
   ensure_env_file
   echo "=== PERF/QUIC current env ==="
-  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW)=" "$ENV_FILE" || true
+  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW|TCP_TO_WT_COALESCE_MS|TCP_TO_WT_FLUSH_THRESHOLD)=" "$ENV_FILE" || true
 }
 
 apply_preset() {
@@ -146,16 +165,18 @@ run_interactive_once() {
 
   echo "Select test group:"
   echo "1) baseline"
-  echo "2) dl-a"
-  echo "3) dl-b"
-  echo "4) dl-c"
-  read -rp "Choice [1-4]: " choice
+  echo "2) baseline-smooth"
+  echo "3) dl-a"
+  echo "4) dl-b"
+  echo "5) dl-c"
+  read -rp "Choice [1-5]: " choice
 
   case "$choice" in
     1) preset="baseline" ;;
-    2) preset="dl-a" ;;
-    3) preset="dl-b" ;;
-    4) preset="dl-c" ;;
+    2) preset="baseline-smooth" ;;
+    3) preset="dl-a" ;;
+    4) preset="dl-b" ;;
+    5) preset="dl-c" ;;
     *)
       echo "ERROR: invalid choice"
       exit 1
