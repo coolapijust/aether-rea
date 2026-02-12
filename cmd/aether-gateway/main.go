@@ -658,12 +658,19 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 		}
 		const (
 			minCoalesceWait = 2 * time.Millisecond
-			maxCoalesceWait = 40 * time.Millisecond
+			maxCoalesceWait = 8 * time.Millisecond
 		)
-		minFlushThreshold := 4096
+		minChunkCap := 12 * 1024
+		if minChunkCap > maxPayload {
+			minChunkCap = maxPayload
+		}
+		minFlushThreshold := minChunkCap
 		maxFlushThreshold := maxPayload * 2
 		if maxFlushThreshold > core.MaxRecordSize-core.RecordHeaderLength {
 			maxFlushThreshold = core.MaxRecordSize - core.RecordHeaderLength
+		}
+		if flushThreshold < minFlushThreshold {
+			flushThreshold = minFlushThreshold
 		}
 		dynamicChunkCap := maxPayload
 		adjustAdaptive := func(writeDur time.Duration, chunkSize int) {
@@ -685,10 +692,10 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 						flushThreshold = minFlushThreshold
 					}
 				}
-				if dynamicChunkCap > minFlushThreshold {
+				if dynamicChunkCap > minChunkCap {
 					dynamicChunkCap -= 1024
-					if dynamicChunkCap < minFlushThreshold {
-						dynamicChunkCap = minFlushThreshold
+					if dynamicChunkCap < minChunkCap {
+						dynamicChunkCap = minChunkCap
 					}
 				}
 			case writeUs < 3000:
