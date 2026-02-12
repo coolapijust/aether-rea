@@ -2,8 +2,10 @@
 
 set -euo pipefail
 
-ENV_FILE="deploy/.env"
-COMPOSE_FILE="deploy/docker-compose.yml"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENV_FILE="${PROJECT_ROOT}/deploy/.env"
+COMPOSE_FILE="${PROJECT_ROOT}/deploy/docker-compose.yml"
 
 usage() {
   cat <<'EOF'
@@ -11,6 +13,7 @@ Usage:
   ./deploy/perf-tune.sh status
   ./deploy/perf-tune.sh apply <preset> [record_payload]
   ./deploy/perf-tune.sh logs [seconds]
+  ./deploy/perf-tune.sh run
   ./deploy/perf-tune.sh matrix
 
 Presets:
@@ -23,6 +26,7 @@ Examples:
   ./deploy/perf-tune.sh apply baseline 16384
   ./deploy/perf-tune.sh apply dl-a 16384
   ./deploy/perf-tune.sh logs 120
+  ./deploy/perf-tune.sh run     # schedules background capture; survives SSH disconnect
 EOF
 }
 
@@ -55,21 +59,9 @@ restart_service() {
   docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
 }
 
-show_status() {
-  ensure_env_file
-  echo "=== PERF/QUIC current env ==="
-  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW)=" "$ENV_FILE" || true
-}
-
-apply_preset() {
-  ensure_env_file
+apply_preset_env_only() {
   local preset="$1"
-  local payload="${2:-16384}"
-
-  if [[ ! "$payload" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: record_payload must be an integer."
-    exit 1
-  fi
+  local payload="$2"
 
   set_env "PERF_DIAG_ENABLE" "1"
   set_env "PERF_DIAG_INTERVAL_SEC" "10"
@@ -106,6 +98,25 @@ apply_preset() {
       exit 1
       ;;
   esac
+}
+
+show_status() {
+  ensure_env_file
+  echo "=== PERF/QUIC current env ==="
+  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW)=" "$ENV_FILE" || true
+}
+
+apply_preset() {
+  ensure_env_file
+  local preset="$1"
+  local payload="${2:-16384}"
+
+  if [[ ! "$payload" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: record_payload must be an integer."
+    exit 1
+  fi
+
+  apply_preset_env_only "$preset" "$payload"
 
   echo "Applied preset: $preset, RECORD_PAYLOAD_BYTES=$payload"
   restart_service
@@ -123,8 +134,168 @@ show_logs() {
     exit 1
   fi
 
-  echo "Collecting [PERF] logs for ${seconds}s..."
-  timeout "${seconds}" docker compose -f "$COMPOSE_FILE" logs -f aether-gateway-core 2>&1 | grep --line-buffered "\[PERF\]" || true
+  echo "Collecting [PERF]/[PERF-GW] logs for ${seconds}s..."
+  timeout "${seconds}" docker compose -f "$COMPOSE_FILE" logs -f aether-gateway-core 2>&1 | grep -E --line-buffered "\[PERF(-GW)?\]" || true
+}
+
+run_interactive_once() {
+  ensure_env_file
+
+  local payload seconds choice preset out_root run_ts out_dir start_delay
+  run_ts="$(date +%Y%m%d-%H%M%S)"
+
+  echo "Select test group:"
+  echo "1) baseline"
+  echo "2) dl-a"
+  echo "3) dl-b"
+  echo "4) dl-c"
+  read -rp "Choice [1-4]: " choice
+
+  case "$choice" in
+    1) preset="baseline" ;;
+    2) preset="dl-a" ;;
+    3) preset="dl-b" ;;
+    4) preset="dl-c" ;;
+    *)
+      echo "ERROR: invalid choice"
+      exit 1
+      ;;
+  esac
+
+  read -rp "RECORD_PAYLOAD_BYTES [default 16384]: " payload
+  payload="${payload:-16384}"
+  if [[ ! "$payload" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: record_payload must be an integer."
+    exit 1
+  fi
+
+  read -rp "PERF log seconds [default 60]: " seconds
+  seconds="${seconds:-60}"
+  if [[ ! "$seconds" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: seconds must be an integer."
+    exit 1
+  fi
+
+  read -rp "Start delay seconds after Enter [default 5]: " start_delay
+  start_delay="${start_delay:-5}"
+  if [[ ! "$start_delay" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: start delay must be an integer."
+    exit 1
+  fi
+
+  read -rp "Save root dir [default \$HOME/perf-runs]: " out_root
+  out_root="${out_root:-$HOME/perf-runs}"
+  out_dir="${out_root}/${run_ts}-${preset}"
+  mkdir -p "$out_dir"
+
+  echo "Applying preset: $preset (payload=$payload)..."
+  {
+    echo "ts=$run_ts"
+    echo "preset=$preset"
+    echo "payload=$payload"
+    echo "seconds=$seconds"
+    echo "start_delay=$start_delay"
+  } > "$out_dir/${preset}-meta.env"
+
+  apply_preset_env_only "$preset" "$payload"
+  restart_service > "$out_dir/${preset}-restart.log" 2>&1
+  show_status > "$out_dir/${preset}-status.log" 2>&1
+
+  local perf_file runner_file runner_log runner_pid_file summary_file since_ts
+  perf_file="$out_dir/${preset}-perf.log"
+  runner_file="$out_dir/${preset}-capture.sh"
+  runner_log="$out_dir/${preset}-runner.log"
+  runner_pid_file="$out_dir/${preset}-runner.pid"
+  summary_file="$out_dir/${preset}-summary.log"
+  since_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  echo "since_utc=$since_ts" >> "$out_dir/${preset}-meta.env"
+
+  cat > "$runner_file" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+sleep ${start_delay}
+timeout ${seconds} docker compose -f "${COMPOSE_FILE}" logs --since "${since_ts}" -f aether-gateway-core 2>&1 | grep -E --line-buffered "\\[PERF(-GW)?\\]" > "${perf_file}" || true
+
+{
+  echo "preset=${preset}"
+  echo "since_utc=${since_ts}"
+  echo "window_sec=${seconds}"
+  if [[ -s "${perf_file}" ]]; then
+    awk '
+      match(\$0, /down\{mbps=([0-9.]+).*read_us=([0-9.]+)/, m) {
+        n_core++
+        mbps = m[1] + 0
+        r = m[2] + 0
+        core_sum += mbps
+        if (n_core == 1 || mbps < core_min) core_min = mbps
+        if (mbps > core_max) core_max = mbps
+        core_rsum += r
+      }
+      match(\$0, /dl\{mbps=([0-9.]+).*write_us=([0-9.]+)/, g) {
+        n_gw++
+        mbps = g[1] + 0
+        w = g[2] + 0
+        gw_sum += mbps
+        if (mbps > 0.10) { gw_nz++; gw_nzsum += mbps }
+        if (n_gw == 1 || mbps < gw_min) gw_min = mbps
+        if (mbps > gw_max) gw_max = mbps
+        gw_wsum += w
+      }
+      END {
+        printf "points_total=%d\n", n_core + n_gw
+        if (n_core > 0) {
+          printf "core_down_points=%d\n", n_core
+          printf "core_down_avg_mbps=%.3f\n", core_sum / n_core
+          printf "core_down_max_mbps=%.3f\n", core_max
+          printf "core_down_min_mbps=%.3f\n", core_min
+          printf "core_down_avg_read_us=%.1f\n", core_rsum / n_core
+        }
+        if (n_gw > 0) {
+          printf "gw_dl_points=%d\n", n_gw
+          printf "gw_dl_avg_mbps=%.3f\n", gw_sum / n_gw
+          printf "gw_dl_max_mbps=%.3f\n", gw_max
+          printf "gw_dl_min_mbps=%.3f\n", gw_min
+          printf "gw_dl_nonzero_points=%d\n", gw_nz
+          if (gw_nz > 0) printf "gw_dl_nonzero_avg_mbps=%.3f\n", gw_nzsum / gw_nz
+          printf "gw_dl_avg_write_us=%.1f\n", gw_wsum / n_gw
+        }
+        if (n_core == 0 && n_gw == 0) {
+          print "points=0"
+        }
+      }
+    ' "${perf_file}"
+    echo "--- tail ---"
+    tail -n 5 "${perf_file}" || true
+  else
+    echo "points=0"
+    echo "note=perf file is empty; check runner log"
+  fi
+} > "${summary_file}" 2>&1
+EOF
+  chmod +x "$runner_file"
+
+  echo
+  echo "Ready. Switch to local client and prepare speed test."
+  read -rp "Press Enter to schedule background PERF capture (delay=${start_delay}s, window=${seconds}s)..."
+
+  nohup bash "$runner_file" > "$runner_log" 2>&1 < /dev/null &
+  echo $! > "$runner_pid_file"
+
+  echo "Saved:"
+  echo "  $out_dir/${preset}-meta.env"
+  echo "  $out_dir/${preset}-status.log"
+  echo "  $runner_log"
+  echo "  $runner_pid_file"
+  echo "  $perf_file"
+  echo "  $summary_file"
+  echo
+  echo "Capture has started in background and will continue even if SSH disconnects."
+  echo "You can check progress with:"
+  echo "  tail -f $runner_log"
+  echo "After it finishes:"
+  echo "  ls -lh $perf_file"
+  echo "  cat $summary_file"
 }
 
 matrix_plan() {
@@ -158,6 +329,9 @@ main() {
     logs)
       show_logs "${2:-60}"
       ;;
+    run)
+      run_interactive_once
+      ;;
     matrix)
       matrix_plan
       ;;
@@ -169,4 +343,3 @@ main() {
 }
 
 main "$@"
-

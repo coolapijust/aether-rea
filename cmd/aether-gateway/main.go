@@ -20,8 +20,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -63,9 +65,99 @@ var (
 	decoyRoot  = flag.String("decoy", "", "Path to the decoy/masquerade static website root")
 )
 
+type gatewayPerfStats struct {
+	wtToTCPBytes atomic.Uint64
+	wtToTCPWrites atomic.Uint64
+	wtToTCPWriteNanos atomic.Uint64
+
+	tcpToWTBytes atomic.Uint64
+	tcpToWTWrites atomic.Uint64
+	tcpToWTWriteNanos atomic.Uint64
+}
+
+var gwPerf gatewayPerfStats
+
+func (s *gatewayPerfStats) observeWTToTCP(bytes int, d time.Duration) {
+	if bytes <= 0 {
+		return
+	}
+	s.wtToTCPBytes.Add(uint64(bytes))
+	s.wtToTCPWrites.Add(1)
+	s.wtToTCPWriteNanos.Add(uint64(d.Nanoseconds()))
+}
+
+func (s *gatewayPerfStats) observeTCPToWT(bytes int, d time.Duration) {
+	if bytes <= 0 {
+		return
+	}
+	s.tcpToWTBytes.Add(uint64(bytes))
+	s.tcpToWTWrites.Add(1)
+	s.tcpToWTWriteNanos.Add(uint64(d.Nanoseconds()))
+}
+
+func startGatewayPerfReporter() {
+	if os.Getenv("PERF_DIAG_ENABLE") != "1" {
+		return
+	}
+
+	interval := 10 * time.Second
+	if v := os.Getenv("PERF_DIAG_INTERVAL_SEC"); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			interval = time.Duration(sec) * time.Second
+		}
+	}
+
+	log.Printf("[PERF-GW] enabled=true interval=%s", interval)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		var prevWTToTCPBytes, prevWTToTCPWrites, prevWTToTCPNanos uint64
+		var prevTCPToWTBytes, prevTCPToWTWrites, prevTCPToWTNanos uint64
+
+		for range ticker.C {
+			curWTToTCPBytes := gwPerf.wtToTCPBytes.Load()
+			curWTToTCPWrites := gwPerf.wtToTCPWrites.Load()
+			curWTToTCPNanos := gwPerf.wtToTCPWriteNanos.Load()
+			curTCPToWTBytes := gwPerf.tcpToWTBytes.Load()
+			curTCPToWTWrites := gwPerf.tcpToWTWrites.Load()
+			curTCPToWTNanos := gwPerf.tcpToWTWriteNanos.Load()
+
+			dWTToTCPBytes := curWTToTCPBytes - prevWTToTCPBytes
+			dWTToTCPWrites := curWTToTCPWrites - prevWTToTCPWrites
+			dWTToTCPNanos := curWTToTCPNanos - prevWTToTCPNanos
+			dTCPToWTBytes := curTCPToWTBytes - prevTCPToWTBytes
+			dTCPToWTWrites := curTCPToWTWrites - prevTCPToWTWrites
+			dTCPToWTNanos := curTCPToWTNanos - prevTCPToWTNanos
+
+			prevWTToTCPBytes, prevWTToTCPWrites, prevWTToTCPNanos = curWTToTCPBytes, curWTToTCPWrites, curWTToTCPNanos
+			prevTCPToWTBytes, prevTCPToWTWrites, prevTCPToWTNanos = curTCPToWTBytes, curTCPToWTWrites, curTCPToWTNanos
+
+			sec := interval.Seconds()
+			ulMbps := float64(dWTToTCPBytes*8) / 1_000_000.0 / sec
+			dlMbps := float64(dTCPToWTBytes*8) / 1_000_000.0 / sec
+
+			ulWriteUs := 0.0
+			if dWTToTCPWrites > 0 {
+				ulWriteUs = (float64(dWTToTCPNanos) / float64(dWTToTCPWrites)) / 1000.0
+			}
+			dlWriteUs := 0.0
+			if dTCPToWTWrites > 0 {
+				dlWriteUs = (float64(dTCPToWTNanos) / float64(dTCPToWTWrites)) / 1000.0
+			}
+
+			log.Printf(
+				"[PERF-GW] window=%s dl{mbps=%.2f writes=%d write_us=%.1f} ul{mbps=%.2f writes=%d write_us=%.1f}",
+				interval, dlMbps, dTCPToWTWrites, dlWriteUs, ulMbps, dWTToTCPWrites, ulWriteUs,
+			)
+		}
+	}()
+}
+
 func main() {
 	flag.Parse()
 	mathrand.Seed(time.Now().UnixNano())
+	startGatewayPerfReporter()
 
 	log.Printf("Aether Gateway 3.2.0 starting")
 
@@ -437,10 +529,12 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 		for {
 			n, err := reader.Read(buf)
 			if n > 0 {
+				writeStart := time.Now()
 				if _, wErr := conn.Write(buf[:n]); wErr != nil {
 					errCh <- wErr
 					return
 				}
+				gwPerf.observeWTToTCP(n, time.Since(writeStart))
 			}
 			if err != nil {
 				if err != io.EOF {
@@ -473,11 +567,13 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 						errCh <- buildErr
 						return
 					}
+					writeStart := time.Now()
 					if _, wErr := stream.Write(recordBytes); wErr != nil {
 						core.PutBuffer(recordBytes)
 						errCh <- wErr
 						return
 					}
+					gwPerf.observeTCPToWT(len(recordBytes), time.Since(writeStart))
 					core.PutBuffer(recordBytes)
 					remaining = remaining[chunkSize:]
 				}
