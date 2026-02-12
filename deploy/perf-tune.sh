@@ -81,6 +81,9 @@ apply_preset_env_only() {
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
       ;;
     baseline-smooth)
       set_or_clear_env "QUIC_INITIAL_STREAM_RECV_WINDOW" ""
@@ -92,6 +95,9 @@ apply_preset_env_only() {
       set_env "TCP_TO_WT_COALESCE_MS" "8"
       set_env "TCP_TO_WT_FLUSH_THRESHOLD" "32768"
       set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
       ;;
     dl-queue-fixed)
       set_or_clear_env "QUIC_INITIAL_STREAM_RECV_WINDOW" ""
@@ -102,6 +108,9 @@ apply_preset_env_only() {
       set_env "TCP_TO_WT_COALESCE_MS" "8"
       set_env "TCP_TO_WT_FLUSH_THRESHOLD" "12288"
       set_env "TCP_TO_WT_QUEUE_SIZE" "256"
+      set_env "TCP_TO_WT_SCHED_MIN_CHUNK" "8192"
+      set_env "TCP_TO_WT_SCHED_MAX_CHUNK" "16384"
+      set_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" "20000"
       ;;
     dl-a)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "6291456"
@@ -112,6 +121,9 @@ apply_preset_env_only() {
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
       ;;
     dl-b)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "8388608"
@@ -122,6 +134,9 @@ apply_preset_env_only() {
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
       ;;
     dl-c)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "10485760"
@@ -132,6 +147,9 @@ apply_preset_env_only() {
       set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
       set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
       set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
       ;;
     *)
       echo "ERROR: unknown preset '$preset'"
@@ -144,7 +162,7 @@ apply_preset_env_only() {
 show_status() {
   ensure_env_file
   echo "=== PERF/QUIC current env ==="
-  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW|TCP_TO_WT_ADAPTIVE|TCP_TO_WT_COALESCE_MS|TCP_TO_WT_FLUSH_THRESHOLD|TCP_TO_WT_QUEUE_SIZE)=" "$ENV_FILE" || true
+  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW|TCP_TO_WT_ADAPTIVE|TCP_TO_WT_COALESCE_MS|TCP_TO_WT_FLUSH_THRESHOLD|TCP_TO_WT_QUEUE_SIZE|TCP_TO_WT_SCHED_MIN_CHUNK|TCP_TO_WT_SCHED_MAX_CHUNK|TCP_TO_WT_SCHED_TARGET_WRITE_US)=" "$ENV_FILE" || true
 }
 
 apply_preset() {
