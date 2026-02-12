@@ -23,6 +23,9 @@ type SessionConfig struct {
 	MaxPadding     int            `json:"max_padding,omitempty"` // 0-65535, default 0
 	RecordPayloadBytes int        `json:"record_payload_bytes,omitempty"` // data record payload size in bytes
 	AllowInsecure  bool           `json:"allow_insecure"`        // Skip TLS verification
+	PerfCaptureEnabled bool       `json:"perf_capture_enabled,omitempty"` // Write [PERF] logs to file
+	PerfCaptureOnConnect bool     `json:"perf_capture_on_connect,omitempty"` // Capture only when Active
+	PerfLogPath    string         `json:"perf_log_path,omitempty"` // Perf log file path
 	Rotation       RotationConfig `json:"rotation,omitempty"`   // Session rotation policy
 	BypassCN       bool           `json:"bypass_cn"`             // Bypass China sites
 	BlockAds       bool           `json:"block_ads"`             // Block advertisement

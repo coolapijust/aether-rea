@@ -255,6 +255,33 @@ export default function Rules() {
               <FormControlLabel
                 control={
                   <Switch
+                    checked={editingConfig.perf_capture_enabled || false}
+                    onChange={(e) => updateEditingConfig({ perf_capture_enabled: e.target.checked })}
+                  />
+                }
+                label={t.rules.label_perf_capture_enabled}
+              />
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={editingConfig.perf_capture_on_connect ?? true}
+                    onChange={(e) => updateEditingConfig({ perf_capture_on_connect: e.target.checked })}
+                  />
+                }
+                label={t.rules.label_perf_capture_on_connect}
+              />
+
+              <TextField
+                label={t.rules.label_perf_log_path}
+                value={editingConfig.perf_log_path ?? 'logs/perf/client-perf.log'}
+                onChange={(e) => updateEditingConfig({ perf_log_path: e.target.value })}
+                fullWidth
+              />
+
+              <FormControlLabel
+                control={
+                  <Switch
                     checked={editingConfig.allow_insecure || false}
                     onChange={(e) => updateEditingConfig({ allow_insecure: e.target.checked })}
                   />

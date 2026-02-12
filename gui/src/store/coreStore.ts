@@ -90,6 +90,9 @@ const defaultConfig: CoreConfig = {
   http_proxy_addr: '127.0.0.1:1081',
   max_padding: 128,
   record_payload_bytes: 16384,
+  perf_capture_enabled: false,
+  perf_capture_on_connect: true,
+  perf_log_path: 'logs/perf/client-perf.log',
   rotation: {
     enabled: true,
     min_interval_ms: 5 * 60 * 1000,
