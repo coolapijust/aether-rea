@@ -15,23 +15,35 @@ if [ -t 1 ]; then
     IS_TTY=1
 fi
 
-# If the terminal/locale is not UTF-8, Chinese text often renders as replacement glyphs (looks "garbage").
-# Auto-fallback to ASCII/English output in that case (can be forced with AETHER_ASCII=1).
-ASCII_MODE="${AETHER_ASCII:-0}"
-if [ "$ASCII_MODE" != "1" ]; then
-    _cm="$(locale charmap 2>/dev/null || true)"
-    case "$_cm" in
-        UTF-8|utf8|utf-8) : ;;
-        *) ASCII_MODE=1 ;;
+# Language selection:
+# - Default is English (more robust over SSH terminals).
+# - Set AETHER_LANG=zh to force Chinese.
+# - Set AETHER_LANG=en to force English.
+# - Set AETHER_LANG=auto to follow LANG/LC_ALL (zh* => Chinese, else English).
+# If terminal/locale isn't UTF-8 or AETHER_ASCII=1, force English to avoid garbled output.
+LANG_MODE="${AETHER_LANG:-en}" # en | zh | auto
+if [ "$LANG_MODE" = "auto" ]; then
+    _lang="${LC_ALL:-${LANG:-}}"
+    case "$_lang" in
+        zh*|zh_*) LANG_MODE="zh" ;;
+        *) LANG_MODE="en" ;;
     esac
 fi
+if [ "${AETHER_ASCII:-0}" = "1" ]; then
+    LANG_MODE="en"
+fi
+_cm="$(locale charmap 2>/dev/null || true)"
+case "$_cm" in
+    UTF-8|utf8|utf-8) : ;;
+    *) LANG_MODE="en" ;;
+esac
 
 t() {
     # Usage: t "<zh>" "<en>"
-    if [ "$ASCII_MODE" = "1" ]; then
-        printf "%s" "$2"
-    else
+    if [ "$LANG_MODE" = "zh" ]; then
         printf "%s" "$1"
+    else
+        printf "%s" "$2"
     fi
 }
 
