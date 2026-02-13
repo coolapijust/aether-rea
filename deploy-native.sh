@@ -119,6 +119,11 @@ read_tty() {
         read -r -p "$__prompt" __in || true
     fi
 
+    # Normalize input:
+    # - strip CR (copy/paste from Windows terminals can add it)
+    # - trim leading/trailing whitespace so "n " doesn't become "invalid" in yn prompts
+    __in="$(printf "%s" "$__in" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
     if [ -z "$__in" ]; then
         __in="$__default"
     fi
@@ -484,18 +489,38 @@ maybe_optimize_udp_buffers() {
     if ! command -v sysctl >/dev/null 2>&1; then
         return 0
     fi
-    local rmax
+    local target rmax wmax
+    target=16777216
     rmax="$(sysctl -n net.core.rmem_max 2>/dev/null || echo 0)"
-    if [ "${rmax:-0}" -ge 16777216 ]; then
+    wmax="$(sysctl -n net.core.wmem_max 2>/dev/null || echo 0)"
+    if [ "${rmax:-0}" -ge "$target" ] && [ "${wmax:-0}" -ge "$target" ]; then
         return 0
     fi
-    say "${YELLOW}$(t "检测到 UDP 接收缓冲区较小" "Detected small UDP receive buffer") (net.core.rmem_max=${rmax})${NC}"
+    say "${YELLOW}$(t "检测到 UDP 缓冲区较小" "Detected small UDP buffers") (net.core.rmem_max=${rmax}, net.core.wmem_max=${wmax})${NC}"
     local yn="n"
     read_tty_yn yn "$(t "是否尝试自动优化内核参数? [y/N]: " "Apply sysctl UDP buffer tuning? [y/N]: ")" "n"
     if [ "$yn" = "y" ]; then
-        run_root sysctl -w net.core.rmem_max=16777216 >/dev/null 2>&1 || true
-        run_root sysctl -w net.core.wmem_max=16777216 >/dev/null 2>&1 || true
-        say "${GREEN}$(t "已临时调整内核参数。" "Kernel params adjusted (temporary).")${NC}"
+        say "$(t "将应用临时调整 (重启后失效)，目标值: " "Applying temporary tuning (non-persistent), target: ")${target}"
+        run_root sysctl -w "net.core.rmem_max=${target}" >/dev/null 2>&1 || true
+        run_root sysctl -w "net.core.wmem_max=${target}" >/dev/null 2>&1 || true
+
+        local r2 w2
+        r2="$(sysctl -n net.core.rmem_max 2>/dev/null || echo 0)"
+        w2="$(sysctl -n net.core.wmem_max 2>/dev/null || echo 0)"
+        say "${GREEN}$(t "已调整:" "Adjusted:")${NC} net.core.rmem_max=${r2}, net.core.wmem_max=${w2}"
+
+        local persist="n"
+        read_tty_yn persist "$(t "是否写入 /etc/sysctl.d/99-aether-gateway.conf 以永久生效? [y/N]: " "Persist via /etc/sysctl.d/99-aether-gateway.conf? [y/N]: ")" "n"
+        if [ "$persist" = "y" ]; then
+            local conf="/etc/sysctl.d/99-aether-gateway.conf"
+            run_root tee "$conf" >/dev/null <<EOF
+# Managed by Aether-Realist deploy-native.sh
+net.core.rmem_max=${target}
+net.core.wmem_max=${target}
+EOF
+            run_root sysctl -p "$conf" >/dev/null 2>&1 || run_root sysctl --system >/dev/null 2>&1 || true
+            say "${GREEN}$(t "已写入并加载 sysctl 配置。" "Persisted and applied sysctl config.")${NC} ($conf)"
+        fi
     fi
 }
 
@@ -911,7 +936,8 @@ EOF
 }
 
 install_or_update_service() {
-    step_total=12
+    # Keep in sync with the number of `step "..."` calls below.
+    step_total=13
     step_i=0
 
     INSTALL_MODE="${INSTALL_MODE:-}"
@@ -1026,19 +1052,59 @@ check_bbr() {
     say ""
     say "${YELLOW}=== $(t "系统传输加速 (BBR) 检查" "BBR Check") ===${NC}"
 
-    local cc=""
-    if command -v sysctl >/dev/null 2>&1; then
-        cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+    if ! command -v sysctl >/dev/null 2>&1; then
+        say "${RED}[WARN] $(t "未检测到 sysctl，无法检查/启用 BBR。" "sysctl not found; cannot check/enable BBR.")${NC}"
+        return 1
     fi
 
-    if [ "$cc" = "bbr" ] || lsmod 2>/dev/null | grep -q "bbr"; then
-        say "${GREEN}[OK] $(t "BBR 已开启。" "BBR is enabled.")${NC}"
+    local cc="" qdisc="" avail=""
+    if command -v sysctl >/dev/null 2>&1; then
+        cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+        qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
+        avail="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || true)"
+    fi
+
+    say "$(t "当前拥塞控制算法: " "Current congestion control: ")${cc:-unknown}"
+    [ -n "$qdisc" ] && say "$(t "当前队列算法 (qdisc): " "Current qdisc: ")${qdisc}"
+    if printf "%s" "$avail" | grep -qw "bbr"; then
+        say "$(t "内核支持 BBR: " "BBR available: ")yes"
+    elif command -v modprobe >/dev/null 2>&1 && modprobe -n tcp_bbr >/dev/null 2>&1; then
+        say "$(t "内核支持 BBR: " "BBR available: ")yes"
     else
-        say "${RED}[WARN] $(t "BBR 未开启。高丢包网络强烈建议开启。" "BBR is not enabled; recommended on lossy networks.")${NC}"
-        say "$(t "参考命令:" "Reference commands:")"
+        say "$(t "内核支持 BBR: " "BBR available: ")no"
+    fi
+
+    if [ "$cc" = "bbr" ]; then
+        say "${GREEN}[OK] $(t "BBR 已启用。" "BBR is enabled.")${NC}"
+        if [ -n "$qdisc" ] && [ "$qdisc" != "fq" ]; then
+            say "${YELLOW}[WARN] $(t "建议将 default_qdisc 设为 fq，以获得更好效果。" "Recommend setting default_qdisc=fq for best results.")${NC}"
+        fi
+    else
+        say "${RED}[WARN] $(t "BBR 未启用。高丢包网络强烈建议启用。" "BBR is not enabled; recommended on lossy networks.")${NC}"
+        say "$(t "参考命令 (永久生效):" "Reference commands (persistent):")"
         say "  echo \"net.core.default_qdisc=fq\" >> /etc/sysctl.conf"
         say "  echo \"net.ipv4.tcp_congestion_control=bbr\" >> /etc/sysctl.conf"
         say "  sysctl -p"
+
+        local yn="n"
+        read_tty_yn yn "$(t "是否尝试现在启用并持久化 BBR? [y/N]: " "Try to enable and persist BBR now? [y/N]: ")" "n"
+        if [ "$yn" = "y" ]; then
+            local conf="/etc/sysctl.d/99-aether-bbr.conf"
+            run_root tee "$conf" >/dev/null <<'EOF'
+# Managed by Aether-Realist deploy-native.sh
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+EOF
+            run_root sysctl -p "$conf" >/dev/null 2>&1 || run_root sysctl --system >/dev/null 2>&1 || true
+            cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+            qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
+            if [ "$cc" = "bbr" ]; then
+                say "${GREEN}[OK] $(t "已启用 BBR。" "BBR enabled.")${NC} ($conf)"
+            else
+                say "${RED}[WARN] $(t "未能启用 BBR (可能内核不支持或需要重启)。" "Failed to enable BBR (kernel may not support it or reboot may be needed).")${NC}"
+            fi
+            [ -n "$qdisc" ] && say "$(t "当前队列算法 (qdisc): " "Current qdisc: ")${qdisc}"
+        fi
     fi
 }
 
