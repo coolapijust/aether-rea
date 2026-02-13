@@ -13,7 +13,7 @@ log() {
     echo -e "${YELLOW}[native]${NC} $*"
 }
 
-SCRIPT_VERSION="2026-02-13-ffdacbb7"
+SCRIPT_VERSION="2026-02-13-c4ddfdfe"
 log "script_version=${SCRIPT_VERSION}"
 
 # When this script is executed via `curl | bash`, stdin is a pipe so `read -p` sees EOF.
@@ -77,10 +77,16 @@ SRC_DIR="${AETHER_HOME}/src"
 ENV_FILE="${AETHER_HOME}/deploy/.env"
 
 # Release download behavior
-# - Default: use GitHub "latest" redirect URL, no tag required.
+# - Default: pin to a specific tag (no redirect, deterministic).
+# - Optional: set AETHER_RELEASE_LATEST=1 to use GitHub "latest" redirect URL.
 # - Optional: set AETHER_RELEASE_TAG=vX.Y.Z to pin an exact release.
+# - Optional: set AETHER_RELEASE_URL to force an exact binary URL (skips arch/tag).
 # - Optional: set VERIFY_SHA256=1 to verify downloaded binary (downloads sha text but does not persist it).
 VERIFY_SHA256="${VERIFY_SHA256:-0}"
+AETHER_RELEASE_LATEST="${AETHER_RELEASE_LATEST:-0}"
+AETHER_RELEASE_URL="${AETHER_RELEASE_URL:-}"
+AETHER_RELEASE_SHA256_URL="${AETHER_RELEASE_SHA256_URL:-}"
+DEFAULT_RELEASE_TAG="v5.2.2"
 
 # Optional ACME (Let's Encrypt) integration via acme.sh.
 # Enable with: ACME_ENABLE=1
@@ -172,8 +178,12 @@ detect_arch() {
 }
 
 try_install_from_release() {
-    # If AETHER_RELEASE_TAG is set, use it; otherwise use latest release.
-    # This avoids requiring Go on the server for native deploy.
+    # Prefer release binary download so native deploy does not require Go.
+    # Priority:
+    #  1) AETHER_RELEASE_URL (exact URL)
+    #  2) AETHER_RELEASE_LATEST=1 (GitHub latest redirect)
+    #  3) AETHER_RELEASE_TAG (pinned tag)
+    #  4) DEFAULT_RELEASE_TAG (script default)
     local tag arch url out sha_url
 
     arch="$(detect_arch)" || return 1
@@ -183,21 +193,26 @@ try_install_from_release() {
     out="${AETHER_HOME}/bin/aether-gateway"
     run_root mkdir -p "$(dirname "$out")"
 
-    if [ -n "$tag" ]; then
-        url="https://github.com/coolapijust/Aether-Realist/releases/download/${tag}/aether-gateway-linux-${arch}"
+    if [ -n "$AETHER_RELEASE_URL" ]; then
+        url="$AETHER_RELEASE_URL"
+        sha_url="${AETHER_RELEASE_SHA256_URL:-${url}.sha256}"
+    elif [ "$AETHER_RELEASE_LATEST" = "1" ]; then
+        url="https://github.com/coolapijust/Aether-Realist/releases/latest/download/aether-gateway-linux-${arch}"
         sha_url="${url}.sha256"
     else
-        # Use GitHub redirect. Avoids API calls / JSON parsing and works without a tag.
-        url="https://github.com/coolapijust/Aether-Realist/releases/latest/download/aether-gateway-linux-${arch}"
+        [ -z "$tag" ] && tag="$DEFAULT_RELEASE_TAG"
+        url="https://github.com/coolapijust/Aether-Realist/releases/download/${tag}/aether-gateway-linux-${arch}"
         sha_url="${url}.sha256"
     fi
     url="$(printf %s "$url" | tr -d '\r\n')"
     sha_url="$(printf %s "$sha_url" | tr -d '\r\n')"
 
-    if [ -n "$tag" ]; then
-        echo -e "${YELLOW}尝试下载预编译网关: ${tag} (linux-${arch})...${NC}"
-    else
+    if [ -n "$AETHER_RELEASE_URL" ]; then
+        echo -e "${YELLOW}尝试下载预编译网关: custom-url (linux-${arch})...${NC}"
+    elif [ "$AETHER_RELEASE_LATEST" = "1" ]; then
         echo -e "${YELLOW}尝试下载预编译网关: latest (linux-${arch})...${NC}"
+    else
+        echo -e "${YELLOW}尝试下载预编译网关: ${tag} (linux-${arch})...${NC}"
     fi
     # Capture curl error so we can see why it failed over SSH.
     local curl_err=""
