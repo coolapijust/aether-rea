@@ -85,14 +85,13 @@ curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/depl
 
 ### 1.1 Native 部署（非 Docker）
 
-适用于不希望引入 Docker 的环境（systemd + 本地二进制）。在服务器仓库目录中执行：
+适用于不希望引入 Docker 的环境（systemd + 本地二进制）。真正一键部署（无需提前 clone 仓库）：
 
 ```bash
-chmod +x ./deploy-native.sh
-./deploy-native.sh
+curl -fsSL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/deploy-native.sh?$(date +%s)" | sudo bash -s -- install
 ```
 
-该脚本会编译并安装二进制到 `/usr/local/bin/aether-gateway`，并写入 systemd 服务 `aether-gateway`。
+该脚本会把源码拉取/更新到 `/opt/aether-realist`，编译并安装二进制到 `/usr/local/bin/aether-gateway`，并写入 systemd 服务 `aether-gateway`。
 
 > 详细参数配置请参阅：[部署指南](docs/deployment.md)
 > 下载瓶颈定位可直接使用：`deploy/perf-tune.sh`（自动应用窗口预设、重启并抓 PERF 日志）。

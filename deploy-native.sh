@@ -16,10 +16,37 @@ echo -e "${GREEN}==============================================${NC}"
 
 DEPLOY_REF="${DEPLOY_REF:-main}"
 GITHUB_RAW_BASE="https://raw.githubusercontent.com/coolapijust/Aether-Realist/${DEPLOY_REF}"
+GITHUB_REPO="https://github.com/coolapijust/Aether-Realist.git"
 SERVICE_NAME="aether-gateway"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 BIN_PATH="/usr/local/bin/aether-gateway"
-ENV_FILE="deploy/.env"
+
+# Native install layout (works from any current directory).
+# AETHER_HOME is the persistent state directory on the server.
+AETHER_HOME="${AETHER_HOME:-/opt/aether-realist}"
+SRC_DIR="${AETHER_HOME}/src"
+ENV_FILE="${AETHER_HOME}/deploy/.env"
+
+is_root() {
+    [ "$(id -u)" -eq 0 ]
+}
+
+run_root() {
+    if is_root; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+require_cmd() {
+    local c="$1"
+    if ! command -v "$c" >/dev/null 2>&1; then
+        echo -e "${RED}错误: 未检测到依赖命令: ${c}${NC}"
+        return 1
+    fi
+    return 0
+}
 
 validate_record_payload_size() {
     local value="$1"
@@ -33,18 +60,14 @@ validate_record_payload_size() {
 }
 
 ensure_prereqs() {
-    if ! command -v go >/dev/null 2>&1; then
-        echo -e "${RED}错误: 未检测到 Go，请先安装 Go (>=1.23)。${NC}"
+    require_cmd curl || exit 1
+    require_cmd systemctl || exit 1
+    require_cmd openssl || exit 1
+    require_cmd go || {
+        echo -e "${RED}错误: 未检测到 Go。Native 部署需要 Go 构建网关。${NC}"
+        echo -e "${YELLOW}建议: 安装 Go 后重试 (go.mod 要求 Go 1.26)。${NC}"
         exit 1
-    fi
-    if ! command -v systemctl >/dev/null 2>&1; then
-        echo -e "${RED}错误: 未检测到 systemd (systemctl)。${NC}"
-        exit 1
-    fi
-    if ! command -v openssl >/dev/null 2>&1; then
-        echo -e "${RED}错误: 未检测到 openssl。${NC}"
-        exit 1
-    fi
+    }
 }
 
 download_file() {
@@ -70,18 +93,68 @@ download_file() {
 
 cleanup_legacy_baks() {
     local count
-    count=$(find . -maxdepth 3 -type f -name "*.bak" | wc -l | tr -d ' ')
+    # Only touch our own home to avoid accidental deletions elsewhere.
+    [ -d "$AETHER_HOME" ] || return 0
+    count=$(find "$AETHER_HOME" -maxdepth 5 -type f -name "*.bak" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$count" != "0" ]; then
-        find . -maxdepth 3 -type f -name "*.bak" -delete
+        find "$AETHER_HOME" -maxdepth 5 -type f -name "*.bak" -delete 2>/dev/null || true
         echo -e "${GREEN}已清理历史备份文件 (*.bak): $count 个。${NC}"
     fi
 }
 
+ensure_source() {
+    run_root mkdir -p "$AETHER_HOME"
+    run_root chown "$(id -u)":"$(id -g)" "$AETHER_HOME" 2>/dev/null || true
+
+    if command -v git >/dev/null 2>&1; then
+        if [ -d "${SRC_DIR}/.git" ]; then
+            echo -e "${YELLOW}检测到已有源码目录，正在更新...${NC}"
+            (cd "$SRC_DIR" && git fetch --all --prune)
+        else
+            echo -e "${YELLOW}正在拉取源码到 ${SRC_DIR}...${NC}"
+            run_root rm -rf "$SRC_DIR"
+            git clone --depth 1 "$GITHUB_REPO" "$SRC_DIR"
+        fi
+        (cd "$SRC_DIR" && {
+            git checkout -f "$DEPLOY_REF" 2>/dev/null || git checkout -f "origin/$DEPLOY_REF"
+            git pull --ff-only 2>/dev/null || true
+        })
+        return 0
+    fi
+
+    # Fallback: tarball download (requires no git).
+    echo -e "${YELLOW}未检测到 git，使用源码压缩包方式拉取...${NC}"
+    local tmp tgz extract_dir
+    tmp="$(mktemp -d)"
+    tgz="${tmp}/src.tgz"
+    extract_dir="${tmp}/extract"
+    mkdir -p "$extract_dir"
+
+    # Note: this URL works for branches; if you need tags/commits, install git.
+    if ! curl -fsSL "https://codeload.github.com/coolapijust/Aether-Realist/tar.gz/refs/heads/${DEPLOY_REF}" -o "$tgz"; then
+        echo -e "${RED}错误: 下载源码压缩包失败。建议安装 git 后重试。${NC}"
+        rm -rf "$tmp"
+        exit 1
+    fi
+    tar -xzf "$tgz" -C "$extract_dir"
+    local top
+    top="$(find "$extract_dir" -maxdepth 1 -type d -name "Aether-Realist-*" | head -n 1)"
+    if [ -z "$top" ]; then
+        echo -e "${RED}错误: 解压源码失败。${NC}"
+        rm -rf "$tmp"
+        exit 1
+    fi
+    run_root rm -rf "$SRC_DIR"
+    run_root mkdir -p "$(dirname "$SRC_DIR")"
+    run_root mv "$top" "$SRC_DIR"
+    rm -rf "$tmp"
+}
+
 ensure_env_file() {
-    mkdir -p deploy/certs deploy/decoy
-    download_file "deploy/.env.example" "false"
+    run_root mkdir -p "${AETHER_HOME}/deploy/certs" "${AETHER_HOME}/deploy/decoy"
+    download_file "${AETHER_HOME}/deploy/.env.example" "false"
     if [ ! -f "$ENV_FILE" ]; then
-        cp deploy/.env.example "$ENV_FILE"
+        cp "${AETHER_HOME}/deploy/.env.example" "$ENV_FILE"
     fi
 }
 
@@ -101,6 +174,14 @@ prompt_core_config() {
     current_domain=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d'=' -f2- | tr -d "'\"")
     current_port=$(grep "^CADDY_PORT=" "$ENV_FILE" | cut -d'=' -f2- | tr -d "'\"[:space:]")
     current_payload=$(grep "^RECORD_PAYLOAD_BYTES=" "$ENV_FILE" | cut -d'=' -f2- | tr -d "'\"[:space:]")
+
+    # Allow env overrides for one-liner installs.
+    # Example:
+    #   PSK=xxx DOMAIN=example.com CADDY_PORT=443 RECORD_PAYLOAD_BYTES=16384 curl ... | sudo bash -s -- install
+    [ -n "$PSK" ] && current_psk="$PSK"
+    [ -n "$DOMAIN" ] && current_domain="$DOMAIN"
+    [ -n "$CADDY_PORT" ] && current_port="$CADDY_PORT"
+    [ -n "$RECORD_PAYLOAD_BYTES" ] && current_payload="$RECORD_PAYLOAD_BYTES"
 
     if [ "$current_psk" = "your_super_secret_token" ] || [ -z "$current_psk" ]; then
         local auto_psk
@@ -138,12 +219,12 @@ prompt_core_config() {
 
 prepare_decoy_and_cert() {
     local decoy_root cert_path key_path
-    decoy_root="$(pwd)/deploy/decoy"
-    cert_path="$(pwd)/deploy/certs/server.crt"
-    key_path="$(pwd)/deploy/certs/server.key"
+    decoy_root="${AETHER_HOME}/deploy/decoy"
+    cert_path="${AETHER_HOME}/deploy/certs/server.crt"
+    key_path="${AETHER_HOME}/deploy/certs/server.key"
 
-    if [ ! -f "deploy/decoy/index.html" ]; then
-        cat > deploy/decoy/index.html <<'EOF'
+    if [ ! -f "${AETHER_HOME}/deploy/decoy/index.html" ]; then
+        cat > "${AETHER_HOME}/deploy/decoy/index.html" <<'EOF'
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Aether Gateway</title></head>
 <body><h1>Service Online</h1><p>Static decoy page.</p></body></html>
@@ -169,20 +250,21 @@ EOF
 
 build_binary() {
     echo -e "${YELLOW}正在构建网关二进制...${NC}"
-    go build -o ./bin/aether-gateway ./cmd/aether-gateway
-    if [ ! -f ./bin/aether-gateway ]; then
+    mkdir -p "${AETHER_HOME}/bin"
+    (cd "$SRC_DIR" && go build -o "${AETHER_HOME}/bin/aether-gateway" ./cmd/aether-gateway)
+    if [ ! -f "${AETHER_HOME}/bin/aether-gateway" ]; then
         echo -e "${RED}构建失败。${NC}"
         exit 1
     fi
-    chmod +x ./bin/aether-gateway
-    sudo install -m 0755 ./bin/aether-gateway "$BIN_PATH"
+    chmod +x "${AETHER_HOME}/bin/aether-gateway"
+    run_root install -m 0755 "${AETHER_HOME}/bin/aether-gateway" "$BIN_PATH"
 }
 
 write_service() {
     local workdir env_abs
-    workdir="$(pwd)"
-    env_abs="${workdir}/${ENV_FILE}"
-    sudo tee "$SERVICE_FILE" >/dev/null <<EOF
+    workdir="${AETHER_HOME}"
+    env_abs="${ENV_FILE}"
+    run_root tee "$SERVICE_FILE" >/dev/null <<EOF
 [Unit]
 Description=Aether Realist Gateway (Native)
 After=network.target
@@ -204,6 +286,7 @@ EOF
 
 install_or_update_service() {
     ensure_prereqs
+    ensure_source
     cleanup_legacy_baks
     ensure_env_file
     prompt_core_config
@@ -212,9 +295,9 @@ install_or_update_service() {
     write_service
 
     echo -e "${YELLOW}正在启动/更新服务...${NC}"
-    sudo systemctl daemon-reload
-    sudo systemctl enable --now "$SERVICE_NAME"
-    sudo systemctl restart "$SERVICE_NAME"
+    run_root systemctl daemon-reload
+    run_root systemctl enable --now "$SERVICE_NAME"
+    run_root systemctl restart "$SERVICE_NAME"
 
     echo -e "${GREEN}部署完成。${NC}"
     show_status
@@ -222,7 +305,7 @@ install_or_update_service() {
 
 show_status() {
     echo -e "\n${YELLOW}=== Native 服务状态 ===${NC}"
-    sudo systemctl --no-pager --full status "$SERVICE_NAME" | sed -n '1,18p' || true
+    run_root systemctl --no-pager --full status "$SERVICE_NAME" | sed -n '1,18p' || true
     local port
     port=$(grep "^CADDY_PORT=" "$ENV_FILE" | cut -d'=' -f2- | tr -d "'\"[:space:]")
     [ -z "$port" ] && port=443
@@ -235,21 +318,21 @@ show_status() {
 }
 
 view_logs() {
-    sudo journalctl -u "$SERVICE_NAME" -f --no-pager
+    run_root journalctl -u "$SERVICE_NAME" -f --no-pager
 }
 
 stop_service() {
-    sudo systemctl stop "$SERVICE_NAME"
+    run_root systemctl stop "$SERVICE_NAME"
     echo -e "${GREEN}服务已停止。${NC}"
 }
 
 remove_service() {
-    sudo systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
-    sudo rm -f "$SERVICE_FILE"
-    sudo systemctl daemon-reload
-    sudo rm -f "$BIN_PATH"
+    run_root systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+    run_root rm -f "$SERVICE_FILE"
+    run_root systemctl daemon-reload
+    run_root rm -f "$BIN_PATH"
     cleanup_legacy_baks
-    echo -e "${GREEN}服务及二进制已移除。配置文件保留在 deploy/.env。${NC}"
+    echo -e "${GREEN}服务及二进制已移除。配置文件保留在 ${ENV_FILE}。${NC}"
 }
 
 show_menu() {

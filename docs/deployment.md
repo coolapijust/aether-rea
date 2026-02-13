@@ -27,11 +27,10 @@ curl -sL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/depl
 
 ## 2.1 Native 一键部署（非 Docker）
 
-适用于不希望使用 Docker 的环境（systemd + 本地二进制）。在服务器仓库目录中执行：
+适用于不希望使用 Docker 的环境（systemd + 本地二进制）。真正一键部署（无需提前 clone 仓库）：
 
 ```bash
-chmod +x ./deploy-native.sh
-./deploy-native.sh
+curl -fsSL "https://raw.githubusercontent.com/coolapijust/Aether-Realist/main/deploy-native.sh?$(date +%s)" | sudo bash -s -- install
 ```
 
 脚本会：
@@ -40,12 +39,13 @@ chmod +x ./deploy-native.sh
 - 自动准备 `deploy/decoy/index.html`（若不存在）
 - `go build` 构建网关并安装到 `/usr/local/bin/aether-gateway`
 - 写入 systemd 服务：`/etc/systemd/system/aether-gateway.service`
+- 源码目录：`/opt/aether-realist/src`
 
 查看状态/日志：
 
 ```bash
-./deploy-native.sh status
-./deploy-native.sh logs
+sudo systemctl status aether-gateway
+sudo journalctl -u aether-gateway -f --no-pager
 ```
 
 ## 3. Docker Compose 关键配置
