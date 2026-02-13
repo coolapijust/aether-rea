@@ -389,10 +389,11 @@ prompt_core_config() {
     # Allow env overrides for one-liner installs.
     # Example:
     #   PSK=xxx DOMAIN=example.com CADDY_PORT=443 RECORD_PAYLOAD_BYTES=16384 curl ... | sudo bash -s -- install
-    [ -n "$PSK" ] && current_psk="$PSK"
-    [ -n "$DOMAIN" ] && current_domain="$DOMAIN"
-    [ -n "$CADDY_PORT" ] && current_port="$CADDY_PORT"
-    [ -n "$RECORD_PAYLOAD_BYTES" ] && current_payload="$RECORD_PAYLOAD_BYTES"
+    # Note: under `set -u`, unbound variables abort the script. Always use ${VAR:-}.
+    [ -n "${PSK:-}" ] && current_psk="${PSK}"
+    [ -n "${DOMAIN:-}" ] && current_domain="${DOMAIN}"
+    [ -n "${CADDY_PORT:-}" ] && current_port="${CADDY_PORT}"
+    [ -n "${RECORD_PAYLOAD_BYTES:-}" ] && current_payload="${RECORD_PAYLOAD_BYTES}"
 
     if [ "$current_psk" = "your_super_secret_token" ] || [ -z "$current_psk" ]; then
         local auto_psk
