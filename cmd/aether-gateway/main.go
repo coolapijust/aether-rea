@@ -397,33 +397,11 @@ func main() {
 	log.Printf("WebTransport capability: H3 datagrams enabled=%v, QUIC datagrams enabled=%v", server.H3.EnableDatagrams, quicConfig.EnableDatagrams)
 	// V5: ReplayCache removed - using counter-based anti-replay
 
-	http.HandleFunc(*secretPath, func(w http.ResponseWriter, r *http.Request) {
-		// Log every attempt to the secret path
-		log.Printf("[DEBUG] connection attempt from %s to %s (Method: %s)", r.RemoteAddr, r.URL.Path, r.Method)
-
-		session, err := server.Upgrade(w, r)
-		if err != nil {
-			log.Printf("[DEBUG] WebTransport upgrade failed (likely non-WT request): %v", err)
-			// Decoy: Return a standard API 401 for unauthorized/non-protocol probes
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"code": 40101, "message": "Invalid authentication token", "status": "error"}`))
-			return
-		}
-
-		state := session.SessionState().ConnectionState.TLS
-		log.Printf("[INFO] WebTransport session upgraded for %s (ALPN: %s)", r.RemoteAddr, state.NegotiatedProtocol)
-		// V5: Create NonceGenerator per session for counter-based nonce
-		ng, err := core.NewNonceGenerator()
-		if err != nil {
-			log.Printf("[ERROR] Failed to create NonceGenerator: %v", err)
-			return
-		}
-		handleSession(session, *psk, ng)
-	})
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// If decoyRoot is specified and index.html exists, serve static files
+	// Serve decoy content in a way that minimizes path-based fingerprinting/oracles.
+	// - If decoyRoot has index.html, serve static files (same behavior as "/").
+	// - Otherwise, serve an nginx-like 403 page with aligned headers.
+	serveDecoyOrForbidden := func(w http.ResponseWriter, r *http.Request) {
+		// If decoyRoot is specified and index.html exists, serve static files.
 		if *decoyRoot != "" {
 			index := fmt.Sprintf("%s/index.html", strings.TrimSuffix(*decoyRoot, "/"))
 			if _, err := os.Stat(index); err == nil {
@@ -445,6 +423,33 @@ func main() {
 <hr><center>nginx/1.18.0 (Ubuntu)</center>
 </body>
 </html>`))
+	}
+
+	http.HandleFunc(*secretPath, func(w http.ResponseWriter, r *http.Request) {
+		// Log every attempt to the secret path
+		log.Printf("[DEBUG] connection attempt from %s to %s (Method: %s)", r.RemoteAddr, r.URL.Path, r.Method)
+
+		session, err := server.Upgrade(w, r)
+		if err != nil {
+			log.Printf("[DEBUG] WebTransport upgrade failed (likely non-WT request): %v", err)
+			// Non-protocol requests must be indistinguishable from normal decoy traffic.
+			serveDecoyOrForbidden(w, r)
+			return
+		}
+
+		state := session.SessionState().ConnectionState.TLS
+		log.Printf("[INFO] WebTransport session upgraded for %s (ALPN: %s)", r.RemoteAddr, state.NegotiatedProtocol)
+		// V5: Create NonceGenerator per session for counter-based nonce
+		ng, err := core.NewNonceGenerator()
+		if err != nil {
+			log.Printf("[ERROR] Failed to create NonceGenerator: %v", err)
+			return
+		}
+		handleSession(session, *psk, ng)
+	})
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		serveDecoyOrForbidden(w, r)
 	})
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -723,7 +728,7 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 		const (
 			defaultTargetWriteUs = 20000.0
 		)
-		minChunkCap := parseIntEnv("TCP_TO_WT_SCHED_MIN_CHUNK", 4096, 1024, maxPayload)
+		minChunkCap := parseIntEnv("TCP_TO_WT_SCHED_MIN_CHUNK", 16384, 8192, maxPayload)
 		maxChunkCap := parseIntEnv("TCP_TO_WT_SCHED_MAX_CHUNK", maxPayload, minChunkCap, maxPayload)
 		baseCoalesceWait := parseDurMs("TCP_TO_WT_COALESCE_MS", 3*time.Millisecond, 0, 200*time.Millisecond)
 		targetWriteUs := defaultTargetWriteUs

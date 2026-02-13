@@ -52,11 +52,22 @@ func init() {
 // updateConfig updates the session manager's configuration.
 func (sm *sessionManager) updateConfig(config *SessionConfig) {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
+	oldProfile := ""
+	if sm.config != nil {
+		oldProfile = sm.config.WindowProfile
+	}
 	sm.config = config
-	// Force dialer re-initialization on next connect
-	sm.dialer = nil
+	newProfile := config.WindowProfile
+	sm.mu.Unlock()
+
+	// If window profile changed, we need to recreate the dialer
+	// so that the next session (after rotation) uses the new window settings.
+	if oldProfile != newProfile {
+		log.Printf("[DEBUG] Window profile changed from '%s' to '%s', reinitializing dialer", oldProfile, newProfile)
+		if err := sm.initialize(); err != nil {
+			log.Printf("[ERROR] Failed to reinitialize dialer after config change: %v", err)
+		}
+	}
 }
 
 // initialize sets up the dialer without connecting.

@@ -27,6 +27,8 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
 	"golang.org/x/crypto/hkdf"
+
+	"aether-rea/internal/core"
 )
 
 const (
@@ -70,6 +72,7 @@ type clientOptions struct {
 	maxPadding  uint16
 	autoIP      bool
 	skipVerify  bool
+	windowProfile string
 }
 
 func main() {
@@ -83,6 +86,7 @@ func main() {
 	flag.UintVar(&maxPadding, "max-padding", 128, "maximum random padding per record")
 	flag.BoolVar(&opts.autoIP, "auto-ip", false, "auto select optimized IP from https://ip.v2too.top/")
 	flag.BoolVar(&opts.skipVerify, "skip-verify", false, "skip TLS certificate verification (INSECURE)")
+	flag.StringVar(&opts.windowProfile, "window-profile", "normal", "transmission profile (conservative, normal, aggressive)")
 	flag.Parse()
 	opts.maxPadding = uint16(maxPadding)
 
@@ -199,11 +203,21 @@ func newSessionManager(opts clientOptions) (*sessionManager, error) {
 		return nil, fmt.Errorf("url must be https")
 	}
 
+	// V5.2: Apply window profile
+	windowCfg, err := core.ResolveQUICWindowConfig(opts.windowProfile)
+	if err != nil {
+		log.Printf("Warning: failed to resolve window profile: %v", err)
+	}
+
 	quicConfig := &quic.Config{
-		KeepAlivePeriod: 20 * time.Second,
-		MaxIdleTimeout:  60 * time.Second,
-		EnableDatagrams: true,
+		KeepAlivePeriod:                20 * time.Second,
+		MaxIdleTimeout:                 60 * time.Second,
+		EnableDatagrams:                true,
 		EnableStreamResetPartialDelivery: true,
+		InitialStreamReceiveWindow:     windowCfg.InitialStreamReceiveWindow,
+		InitialConnectionReceiveWindow: windowCfg.InitialConnectionReceiveWindow,
+		MaxStreamReceiveWindow:         windowCfg.MaxStreamReceiveWindow,
+		MaxConnectionReceiveWindow:     windowCfg.MaxConnectionReceiveWindow,
 	}
 
 	dialer := &webtransport.Dialer{
