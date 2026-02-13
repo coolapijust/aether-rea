@@ -100,7 +100,7 @@ curl_fetch() {
     fi
 }
 
-SCRIPT_VERSION="2026-02-13-ca730f9f"
+SCRIPT_VERSION="2026-02-13-acme-install-fix"
 log "script_version=${SCRIPT_VERSION}"
 
 # When this script is executed via `curl | bash`, stdin is a pipe so `read -p` sees EOF.
@@ -654,7 +654,16 @@ ensure_acme_sh() {
     fi
 
     # Install into $ACME_HOME_DIR (do not pollute /root).
-    (export HOME="$ACME_HOME_DIR"; curl -fsSL https://get.acme.sh | sh -s email="${ACME_EMAIL}")
+    # NOTE: get.acme.sh arg parsing is picky; passing an empty/unknown arg can break with "shift" errors.
+    # Use bash and only pass email when non-empty.
+    (
+        export HOME="$ACME_HOME_DIR"
+        if [ -n "$ACME_EMAIL" ]; then
+            curl -fsSL https://get.acme.sh | bash -s -- --home "$ACME_HOME_DIR" --accountemail "$ACME_EMAIL"
+        else
+            curl -fsSL https://get.acme.sh | bash -s -- --home "$ACME_HOME_DIR"
+        fi
+    )
     if [ ! -x "$(acme_bin)" ]; then
         say "${RED}$(t "错误: acme.sh 安装失败。" "Error: failed to install acme.sh.")${NC}"
         exit 1
