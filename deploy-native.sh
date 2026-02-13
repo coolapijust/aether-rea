@@ -28,6 +28,12 @@ AETHER_HOME="${AETHER_HOME:-/opt/aether-realist}"
 SRC_DIR="${AETHER_HOME}/src"
 ENV_FILE="${AETHER_HOME}/deploy/.env"
 
+# Release download behavior
+# - Default: use GitHub "latest" redirect URL, no tag required.
+# - Optional: set AETHER_RELEASE_TAG=vX.Y.Z to pin an exact release.
+# - Optional: set VERIFY_SHA256=1 to verify downloaded binary (downloads sha text but does not persist it).
+VERIFY_SHA256="${VERIFY_SHA256:-0}"
+
 # Optional ACME (Let's Encrypt) integration via acme.sh.
 # Enable with: ACME_ENABLE=1
 ACME_ENABLE="${ACME_ENABLE:-0}"
@@ -96,14 +102,6 @@ detect_arch() {
     esac
 }
 
-get_latest_release_tag() {
-    # Minimal JSON parsing (no jq dependency).
-    curl -fsSL "${GITHUB_API_REPO}/releases/latest" \
-        | grep -m1 '"tag_name"' \
-        | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/' \
-        | tr -d '\r\n\t '
-}
-
 try_install_from_release() {
     # If AETHER_RELEASE_TAG is set, use it; otherwise use latest release.
     # This avoids requiring Go on the server for native deploy.
@@ -112,23 +110,26 @@ try_install_from_release() {
     arch="$(detect_arch)" || return 1
     tag="${AETHER_RELEASE_TAG:-}"
     tag="$(printf %s "$tag" | tr -d '\r\n\t ')"
-    if [ -z "$tag" ]; then
-        tag="$(get_latest_release_tag 2>/dev/null || true)"
-    fi
-    tag="$(printf %s "$tag" | tr -d '\r\n\t ')"
-    if [ -z "$tag" ]; then
-        return 1
-    fi
 
     out="${AETHER_HOME}/bin/aether-gateway"
     run_root mkdir -p "$(dirname "$out")"
 
-    url="https://github.com/coolapijust/Aether-Realist/releases/download/${tag}/aether-gateway-linux-${arch}"
-    sha_url="${url}.sha256"
+    if [ -n "$tag" ]; then
+        url="https://github.com/coolapijust/Aether-Realist/releases/download/${tag}/aether-gateway-linux-${arch}"
+        sha_url="${url}.sha256"
+    else
+        # Use GitHub redirect. Avoids API calls / JSON parsing and works without a tag.
+        url="https://github.com/coolapijust/Aether-Realist/releases/latest/download/aether-gateway-linux-${arch}"
+        sha_url="${url}.sha256"
+    fi
     url="$(printf %s "$url" | tr -d '\r\n')"
     sha_url="$(printf %s "$sha_url" | tr -d '\r\n')"
 
-    echo -e "${YELLOW}尝试下载预编译网关: ${tag} (linux-${arch})...${NC}"
+    if [ -n "$tag" ]; then
+        echo -e "${YELLOW}尝试下载预编译网关: ${tag} (linux-${arch})...${NC}"
+    else
+        echo -e "${YELLOW}尝试下载预编译网关: latest (linux-${arch})...${NC}"
+    fi
     if ! curl -fsSL "$url" -o "$out"; then
         # Helpful when curl returns (3): show the exact URL bytes/escapes.
         echo -e "${YELLOW}Release URL (escaped): $(printf %q "$url")${NC}" 1>&2
@@ -136,17 +137,19 @@ try_install_from_release() {
     fi
     chmod +x "$out"
 
-    # Best-effort checksum verify if sha file exists.
-    # Release sha files may contain either "hash  dist/file" or "hash  file".
-    if curl -fsSL "$sha_url" -o "${out}.sha256" 2>/dev/null; then
+    # Optional checksum verify (disabled by default to avoid extra network + file writes).
+    if [ "$VERIFY_SHA256" = "1" ]; then
+        # sha file may contain either "hash  dist/file" or "hash  file".
         local expected actual
-        expected="$(awk '{print $1}' "${out}.sha256" | head -n 1 | tr -d '\r')"
-        actual="$(sha256sum "$out" | awk '{print $1}')"
-        if [ -n "$expected" ] && [ "$expected" != "$actual" ]; then
-            echo -e "${RED}校验失败: sha256 不匹配${NC}"
-            echo -e "${YELLOW}expected=${expected}${NC}"
-            echo -e "${YELLOW}actual  =${actual}${NC}"
-            return 1
+        expected="$(curl -fsSL "$sha_url" 2>/dev/null | awk '{print $1}' | head -n 1 | tr -d '\r')"
+        if [ -n "$expected" ]; then
+            actual="$(sha256sum "$out" | awk '{print $1}')"
+            if [ "$expected" != "$actual" ]; then
+                echo -e "${RED}校验失败: sha256 不匹配${NC}"
+                echo -e "${YELLOW}expected=${expected}${NC}"
+                echo -e "${YELLOW}actual  =${actual}${NC}"
+                return 1
+            fi
         fi
     fi
 
