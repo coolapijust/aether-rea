@@ -27,6 +27,18 @@ AETHER_HOME="${AETHER_HOME:-/opt/aether-realist}"
 SRC_DIR="${AETHER_HOME}/src"
 ENV_FILE="${AETHER_HOME}/deploy/.env"
 
+# Optional ACME (Let's Encrypt) integration via acme.sh.
+# Enable with: ACME_ENABLE=1
+ACME_ENABLE="${ACME_ENABLE:-0}"
+ACME_EMAIL="${ACME_EMAIL:-}"
+# Modes:
+# - standalone: use HTTP-01 on TCP/80 (no downtime; recommended)
+# - alpn-stop: stop gateway briefly and use TLS-ALPN-01 on TCP/443 (downtime)
+ACME_MODE="${ACME_MODE:-standalone}"
+ACME_CA="${ACME_CA:-letsencrypt}"
+ACME_KEYLENGTH="${ACME_KEYLENGTH:-ec-256}"
+ACME_HOME_DIR="${ACME_HOME_DIR:-${AETHER_HOME}/acme-home}"
+
 is_root() {
     [ "$(id -u)" -eq 0 ]
 }
@@ -56,6 +68,20 @@ validate_record_payload_size() {
     if [ "$value" -lt 1024 ] || [ "$value" -gt 262144 ]; then
         return 1
     fi
+    return 0
+}
+
+port_in_use() {
+    local port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn | awk '{print $4}' | grep -qE "(:|\\[::\\])${port}$"
+        return $?
+    fi
+    if command -v netstat >/dev/null 2>&1; then
+        netstat -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(:|\\[::\\])${port}$"
+        return $?
+    fi
+    # Unknown: assume in use to avoid surprising failures.
     return 0
 }
 
@@ -101,6 +127,81 @@ cleanup_legacy_baks() {
         find "$AETHER_HOME" -maxdepth 5 -type f -name "*.bak" -delete 2>/dev/null || true
         echo -e "${GREEN}已清理历史备份文件 (*.bak): $count 个。${NC}"
     fi
+}
+
+acme_bin() {
+    echo "${ACME_HOME_DIR}/.acme.sh/acme.sh"
+}
+
+ensure_acme_sh() {
+    run_root mkdir -p "$ACME_HOME_DIR"
+    run_root chown "$(id -u)":"$(id -g)" "$ACME_HOME_DIR" 2>/dev/null || true
+
+    if [ -x "$(acme_bin)" ]; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}正在安装 acme.sh...${NC}"
+    if [ -z "$ACME_EMAIL" ]; then
+        read -p "请输入 ACME 账号邮箱 (用于 Let's Encrypt; 可留空): " ACME_EMAIL
+    fi
+
+    # Install into $ACME_HOME_DIR (do not pollute /root).
+    (export HOME="$ACME_HOME_DIR"; curl -fsSL https://get.acme.sh | sh -s email="${ACME_EMAIL}")
+    if [ ! -x "$(acme_bin)" ]; then
+        echo -e "${RED}错误: acme.sh 安装失败。${NC}"
+        exit 1
+    fi
+}
+
+setup_acme_cert() {
+    if [ "$ACME_ENABLE" != "1" ]; then
+        return 0
+    fi
+
+    local domain cert_path key_path
+    domain=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d'=' -f2- | tr -d "'\"")
+    cert_path="${AETHER_HOME}/deploy/certs/server.crt"
+    key_path="${AETHER_HOME}/deploy/certs/server.key"
+
+    if [ -z "$domain" ] || [ "$domain" = "your-domain.com" ] || [ "$domain" = "localhost" ]; then
+        echo -e "${YELLOW}ACME_ENABLE=1 但 DOMAIN 未正确配置，跳过 acme.sh。${NC}"
+        return 0
+    fi
+
+    ensure_acme_sh
+
+    echo -e "${YELLOW}正在申请/更新证书 (acme.sh, mode=${ACME_MODE})...${NC}"
+
+    if [ "$ACME_MODE" = "standalone" ]; then
+        if port_in_use 80; then
+            echo -e "${RED}错误: 80/tcp 被占用，无法使用 standalone HTTP-01。${NC}"
+            echo -e "${YELLOW}退路:${NC}"
+            echo -e "  1) 释放 80/tcp 后重试 (推荐)"
+            echo -e "  2) 设置 ACME_MODE=alpn-stop (会短暂停服占用 443 走 TLS-ALPN-01)"
+            return 1
+        fi
+        (export HOME="$ACME_HOME_DIR"; "$(acme_bin)" --set-default-ca --server "$ACME_CA" >/dev/null 2>&1 || true)
+        (export HOME="$ACME_HOME_DIR"; "$(acme_bin)" --issue -d "$domain" --standalone --keylength "$ACME_KEYLENGTH")
+    elif [ "$ACME_MODE" = "alpn-stop" ]; then
+        echo -e "${YELLOW}ACME_MODE=alpn-stop: 将短暂停止网关以占用 443 申请证书。${NC}"
+        run_root systemctl stop "$SERVICE_NAME" || true
+        (export HOME="$ACME_HOME_DIR"; "$(acme_bin)" --set-default-ca --server "$ACME_CA" >/dev/null 2>&1 || true)
+        (export HOME="$ACME_HOME_DIR"; "$(acme_bin)" --issue -d "$domain" --alpn --keylength "$ACME_KEYLENGTH")
+        run_root systemctl start "$SERVICE_NAME" || true
+    else
+        echo -e "${RED}错误: 未知 ACME_MODE=$ACME_MODE。${NC}"
+            return 1
+    fi
+
+    # Install cert and auto-reload gateway via SIGHUP.
+    (export HOME="$ACME_HOME_DIR"; "$(acme_bin)" --install-cert -d "$domain" \
+        --fullchain-file "$cert_path" \
+        --key-file "$key_path" \
+        --reloadcmd "systemctl kill -s HUP ${SERVICE_NAME}")
+
+    echo -e "${GREEN}ACME 证书已安装: ${cert_path}${NC}"
+    return 0
 }
 
 ensure_source() {
@@ -291,6 +392,8 @@ install_or_update_service() {
     cleanup_legacy_baks
     ensure_env_file
     prompt_core_config
+    # Optional: obtain real cert before generating self-signed.
+    setup_acme_cert || true
     prepare_decoy_and_cert
     build_binary
     write_service

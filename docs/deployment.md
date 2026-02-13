@@ -115,6 +115,16 @@ acme.sh --install-cert -d your-domain.com \
   --reloadcmd "docker kill -s HUP aether-gateway-core"
 ```
 
+### 5.1 可选：一键脚本集成 acme.sh（推荐 standalone）
+
+`deploy.sh` / `deploy-native.sh` 支持可选启用 `acme.sh` 自动签发/续期证书：
+
+- `ACME_ENABLE=1`：启用
+- `ACME_MODE=standalone`：HTTP-01 使用 `80/tcp`（无停机，推荐）
+- `ACME_MODE=alpn-stop`：TLS-ALPN-01 使用 `443/tcp`（需要短暂停止服务占用 443，作为退路）
+
+注意：`standalone` 要求 `80/tcp` 可用且公网可达（安全组/防火墙放行）。
+
 ## 6. 性能参数
 
 ### 6.1 `WINDOW_PROFILE`

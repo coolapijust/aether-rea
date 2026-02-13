@@ -85,6 +85,13 @@ check_self_update() {
 # 执行自动更新检查
 check_self_update "$1"
 
+# Optional ACME (Let's Encrypt) integration via acme.sh (host-side).
+# Enable by setting ACME_ENABLE=1 in deploy/.env (or answer prompt during install).
+ACME_ENABLE_DEFAULT="${ACME_ENABLE_DEFAULT:-0}"
+ACME_MODE_DEFAULT="${ACME_MODE_DEFAULT:-standalone}" # standalone | alpn-stop
+ACME_CA_DEFAULT="${ACME_CA_DEFAULT:-letsencrypt}"
+ACME_KEYLENGTH_DEFAULT="${ACME_KEYLENGTH_DEFAULT:-ec-256}"
+
 # 校验 record payload 大小，返回 0 表示合法
 validate_record_payload_size() {
     local VALUE="$1"
@@ -95,6 +102,87 @@ validate_record_payload_size() {
     if [ "$VALUE" -lt 1024 ] || [ "$VALUE" -gt 262144 ]; then
         return 1
     fi
+    return 0
+}
+
+port_in_use() {
+    local PORT="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn | awk '{print $4}' | grep -qE "(:|\\[::\\])${PORT}$"
+        return $?
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(:|\\[::\\])${PORT}$"
+        return $?
+    fi
+    return 0
+}
+
+acme_bin() {
+    echo "deploy/acme-home/.acme.sh/acme.sh"
+}
+
+ensure_acme_sh() {
+    mkdir -p deploy/acme-home
+    if [ -x "$(acme_bin)" ]; then
+        return 0
+    fi
+    echo -e "${YELLOW}正在安装 acme.sh...${NC}"
+    (export HOME="$(pwd)/deploy/acme-home"; curl -fsSL https://get.acme.sh | sh)
+    if [ ! -x "$(acme_bin)" ]; then
+        echo -e "${RED}错误: acme.sh 安装失败。${NC}"
+        return 1
+    fi
+    return 0
+}
+
+setup_acme_cert_docker() {
+    local DOMAIN_FOR_ACME="$1"
+    local MODE="$2"
+    local CA="$3"
+    local KEYLENGTH="$4"
+
+    if [ -z "$DOMAIN_FOR_ACME" ] || [ "$DOMAIN_FOR_ACME" = "your-domain.com" ] || [ "$DOMAIN_FOR_ACME" = "localhost" ]; then
+        echo -e "${YELLOW}ACME: DOMAIN 未正确配置，跳过。${NC}"
+        return 0
+    fi
+
+    if ! ensure_acme_sh; then
+        return 1
+    fi
+
+    mkdir -p deploy/certs
+    local CERT_PATH="$(pwd)/deploy/certs/server.crt"
+    local KEY_PATH="$(pwd)/deploy/certs/server.key"
+
+    echo -e "${YELLOW}ACME: 申请/更新证书 (mode=${MODE})...${NC}"
+
+    if [ "$MODE" = "standalone" ]; then
+        if port_in_use 80; then
+            echo -e "${RED}ACME: 80/tcp 被占用，无法使用 standalone HTTP-01。${NC}"
+            echo -e "${YELLOW}退路:${NC}"
+            echo -e "  1) 释放 80/tcp 后重试 (推荐)"
+            echo -e "  2) 设置 ACME_MODE=alpn-stop (会短暂停止容器占用 443 走 TLS-ALPN-01)"
+            return 1
+        fi
+        (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --set-default-ca --server "$CA" >/dev/null 2>&1 || true)
+        (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --issue -d "$DOMAIN_FOR_ACME" --standalone --keylength "$KEYLENGTH")
+    elif [ "$MODE" = "alpn-stop" ]; then
+        echo -e "${YELLOW}ACME: alpn-stop 将短暂停止容器以释放 443...${NC}"
+        docker compose -f deploy/docker-compose.yml stop >/dev/null 2>&1 || true
+        (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --set-default-ca --server "$CA" >/dev/null 2>&1 || true)
+        (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --issue -d "$DOMAIN_FOR_ACME" --alpn --keylength "$KEYLENGTH")
+        docker compose -f deploy/docker-compose.yml up -d >/dev/null 2>&1 || true
+    else
+        echo -e "${RED}ACME: 未知模式 ACME_MODE=$MODE${NC}"
+        return 1
+    fi
+
+    (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --install-cert -d "$DOMAIN_FOR_ACME" \
+        --fullchain-file "$CERT_PATH" \
+        --key-file "$KEY_PATH" \
+        --reloadcmd "docker kill -s HUP aether-gateway-core")
+
+    echo -e "${GREEN}ACME: 证书已安装到 deploy/certs/${NC}"
     return 0
 }
 
@@ -187,6 +275,42 @@ install_service() {
         echo "DOMAIN='$SAFE_DOMAIN'" >> "$ENV_FILE"
     fi
 
+    # Optional: ACME integration (host-side) to provision real certs into deploy/certs.
+    CURRENT_ACME_ENABLE=$(grep "^ACME_ENABLE=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+    CURRENT_ACME_MODE=$(grep "^ACME_MODE=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+    CURRENT_ACME_EMAIL=$(grep "^ACME_EMAIL=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+    CURRENT_ACME_CA=$(grep "^ACME_CA=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+    CURRENT_ACME_KEYLENGTH=$(grep "^ACME_KEYLENGTH=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+
+    DEFAULT_ACME_ENABLE="${CURRENT_ACME_ENABLE:-$ACME_ENABLE_DEFAULT}"
+    read -p "是否启用 acme.sh 自动签发/续期证书(Let's Encrypt)? [y/N] (当前: ${DEFAULT_ACME_ENABLE}): " ACME_ENABLE_CONFIRM
+    ACME_ENABLE="0"
+    if [[ "$ACME_ENABLE_CONFIRM" =~ ^[Yy]$ ]] || [ "$DEFAULT_ACME_ENABLE" = "1" ]; then
+        ACME_ENABLE="1"
+    fi
+
+    ACME_MODE="${CURRENT_ACME_MODE:-$ACME_MODE_DEFAULT}"
+    ACME_CA="${CURRENT_ACME_CA:-$ACME_CA_DEFAULT}"
+    ACME_KEYLENGTH="${CURRENT_ACME_KEYLENGTH:-$ACME_KEYLENGTH_DEFAULT}"
+    ACME_EMAIL="${CURRENT_ACME_EMAIL:-}"
+    if [ "$ACME_ENABLE" = "1" ]; then
+        read -p "ACME 模式 [standalone/alpn-stop] (默认: $ACME_MODE): " ACME_MODE_INPUT
+        ACME_MODE="${ACME_MODE_INPUT:-$ACME_MODE}"
+        read -p "ACME 邮箱 (可留空): " ACME_EMAIL_INPUT
+        ACME_EMAIL="${ACME_EMAIL_INPUT:-$ACME_EMAIL}"
+    fi
+
+    sed -i "/^ACME_ENABLE=/d" "$ENV_FILE"
+    sed -i "/^ACME_MODE=/d" "$ENV_FILE"
+    sed -i "/^ACME_EMAIL=/d" "$ENV_FILE"
+    sed -i "/^ACME_CA=/d" "$ENV_FILE"
+    sed -i "/^ACME_KEYLENGTH=/d" "$ENV_FILE"
+    echo "ACME_ENABLE=$ACME_ENABLE" >> "$ENV_FILE"
+    echo "ACME_MODE=$ACME_MODE" >> "$ENV_FILE"
+    echo "ACME_EMAIL='$ACME_EMAIL'" >> "$ENV_FILE"
+    echo "ACME_CA=$ACME_CA" >> "$ENV_FILE"
+    echo "ACME_KEYLENGTH=$ACME_KEYLENGTH" >> "$ENV_FILE"
+
     # 4. 智能端口检测与证书配置
     echo -e "\n${YELLOW}[4/5] 检测端口与配置证书...${NC}"
     check_port() {
@@ -253,6 +377,15 @@ install_service() {
         HAS_EXISTING_CERT=1
     elif [ -n "$CURRENT_HOST_CERT_PATH" ] && [ -n "$CURRENT_HOST_KEY_PATH" ] && [ -f "$CURRENT_HOST_CERT_PATH" ] && [ -f "$CURRENT_HOST_KEY_PATH" ]; then
         HAS_EXISTING_CERT=1
+    fi
+
+    # If ACME is enabled and no cert exists yet, try provisioning now.
+    if [ "$ACME_ENABLE" = "1" ] && [ "$HAS_EXISTING_CERT" = "0" ]; then
+        DOMAIN_FOR_ACME=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"")
+        setup_acme_cert_docker "$DOMAIN_FOR_ACME" "$ACME_MODE" "$ACME_CA" "$ACME_KEYLENGTH" || true
+        if [ -f "deploy/certs/server.crt" ] && [ -f "deploy/certs/server.key" ]; then
+            HAS_EXISTING_CERT=1
+        fi
     fi
 
     REUSE_EXISTING_CONFIG="n"
