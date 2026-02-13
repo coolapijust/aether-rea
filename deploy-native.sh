@@ -8,6 +8,43 @@ set -euo pipefail
 # Print the failing command and line number. This makes "silent exits" diagnosable over SSH.
 trap 'echo "ERROR: line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
+# When this script is executed via `curl | bash`, stdin is a pipe so `read -p` sees EOF.
+# Always prefer reading from /dev/tty when available so one-liner installs remain interactive.
+read_tty() {
+    # Usage: read_tty <var_name> <prompt> [default]
+    local __var="$1"
+    local __prompt="$2"
+    local __default="${3:-}"
+    local __in=""
+
+    if [ -r /dev/tty ]; then
+        # Don't let `read` failure abort the script under `set -e`.
+        read -r -p "$__prompt" __in </dev/tty || true
+    else
+        read -r -p "$__prompt" __in || true
+    fi
+
+    if [ -z "$__in" ]; then
+        __in="$__default"
+    fi
+    printf -v "$__var" "%s" "$__in"
+}
+
+read_tty_yn() {
+    # Usage: read_tty_yn <var_name> <prompt> <default_y_or_n>
+    local __var="$1"
+    local __prompt="$2"
+    local __default="${3:-n}"
+    local __in=""
+
+    read_tty __in "$__prompt" "$__default"
+    case "$__in" in
+        y|Y) printf -v "$__var" "%s" "y" ;;
+        n|N) printf -v "$__var" "%s" "n" ;;
+        *)   printf -v "$__var" "%s" "$__default" ;;
+    esac
+}
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -215,7 +252,7 @@ ensure_acme_sh() {
 
     echo -e "${YELLOW}正在安装 acme.sh...${NC}"
     if [ -z "$ACME_EMAIL" ]; then
-        read -p "请输入 ACME 账号邮箱 (用于 Let's Encrypt; 可留空): " ACME_EMAIL
+        read_tty ACME_EMAIL "请输入 ACME 账号邮箱 (用于 Let's Encrypt; 可留空): " ""
     fi
 
     # Install into $ACME_HOME_DIR (do not pollute /root).
@@ -360,25 +397,25 @@ prompt_core_config() {
     if [ "$current_psk" = "your_super_secret_token" ] || [ -z "$current_psk" ]; then
         local auto_psk
         auto_psk=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
-        read -p "请输入 PSK (默认随机: $auto_psk): " input_psk
+        read_tty input_psk "请输入 PSK (默认随机: $auto_psk): " ""
         current_psk="${input_psk:-$auto_psk}"
     fi
 
     if [ "$current_domain" = "your-domain.com" ] || [ -z "$current_domain" ]; then
-        read -p "请输入 DOMAIN (可随时修改): " input_domain
+        read_tty input_domain "请输入 DOMAIN (可随时修改): " ""
         current_domain="${input_domain:-localhost}"
     fi
 
     if [[ ! "$current_port" =~ ^[0-9]+$ ]]; then
         current_port=443
     fi
-    read -p "监听端口 CADDY_PORT (默认: $current_port): " input_port
+    read_tty input_port "监听端口 CADDY_PORT (默认: $current_port): " ""
     current_port="${input_port:-$current_port}"
 
     if ! validate_record_payload_size "$current_payload"; then
         current_payload=16384
     fi
-    read -p "设置 RECORD_PAYLOAD_BYTES [4096/8192/16384] (默认: $current_payload): " input_payload
+    read_tty input_payload "设置 RECORD_PAYLOAD_BYTES [4096/8192/16384] (默认: $current_payload): " ""
     current_payload="${input_payload:-$current_payload}"
     if ! validate_record_payload_size "$current_payload"; then
         echo -e "${YELLOW}输入无效，回退为 16384。${NC}"
@@ -538,7 +575,7 @@ show_menu() {
     echo "4. 查看状态"
     echo "5. 查看日志"
     echo "0. 退出"
-    read -p "请输入选项 [0-5]: " option
+    read_tty option "请输入选项 [0-5]: " ""
     case "$option" in
         1) install_or_update_service ;;
         2) stop_service ;;
@@ -563,6 +600,10 @@ else
     while true; do
         show_menu
         echo -e "\n按任意键返回菜单..."
-        read -n 1
+        if [ -r /dev/tty ]; then
+            read -n 1 </dev/tty || true
+        else
+            read -n 1 || true
+        fi
     done
 fi
