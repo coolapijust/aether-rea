@@ -263,11 +263,6 @@ func BuildDataRecord(payload []byte, _ uint16, ng *NonceGenerator) ([]byte, erro
 	}
 	sessionID := nonce[0:4]
 
-	header, err := buildHeader(TypeData, len(payload), paddingLength, sessionID, counter)
-	if err != nil {
-		return nil, err
-	}
-
 	totalLength := RecordHeaderLength + len(payload)
 	// Use pool for data records which are the bulk of traffic
 	buf := GetBuffer()
@@ -280,7 +275,11 @@ func BuildDataRecord(payload []byte, _ uint16, ng *NonceGenerator) ([]byte, erro
 	}
 
 	binary.BigEndian.PutUint32(buf[0:4], uint32(totalLength))
-	copy(buf[4:4+RecordHeaderLength], header)
+	// Zero-alloc: build header directly into pool buffer
+	if err := buildHeaderInto(buf[4:4+RecordHeaderLength], TypeData, len(payload), paddingLength, sessionID, counter); err != nil {
+		PutBuffer(buf)
+		return nil, err
+	}
 	copy(buf[4+RecordHeaderLength:], payload)
 	
 	return buf, nil
@@ -323,6 +322,25 @@ func buildHeader(recordType byte, payloadLen, paddingLen int, sessionID []byte, 
 	copy(header[headerSessionIDOffset:headerSessionIDOffset+headerSessionIDLength], sessionID)
 	binary.BigEndian.PutUint64(header[headerCounterOffset:headerCounterOffset+headerCounterLength], counter)
 	return header, nil
+}
+
+// buildHeaderInto writes a record header directly into dst (must be >= RecordHeaderLength bytes).
+// Zero-allocation alternative to buildHeader for hot paths.
+func buildHeaderInto(dst []byte, recordType byte, payloadLen, paddingLen int, sessionID []byte, counter uint64) error {
+	if len(dst) < RecordHeaderLength {
+		return fmt.Errorf("dst too small for header: %d < %d", len(dst), RecordHeaderLength)
+	}
+	if len(sessionID) != headerSessionIDLength {
+		return fmt.Errorf("invalid SessionID length: %d", len(sessionID))
+	}
+	dst[headerVersionOffset] = ProtocolVersion
+	dst[headerTypeOffset] = recordType
+	binary.BigEndian.PutUint64(dst[headerTimestampOffset:headerTimestampOffset+headerTimestampSize], uint64(time.Now().UnixNano()))
+	binary.BigEndian.PutUint32(dst[headerPayloadLenOffset:headerPayloadLenOffset+4], uint32(payloadLen))
+	binary.BigEndian.PutUint32(dst[headerPaddingLenOffset:headerPaddingLenOffset+4], uint32(paddingLen))
+	copy(dst[headerSessionIDOffset:headerSessionIDOffset+headerSessionIDLength], sessionID)
+	binary.BigEndian.PutUint64(dst[headerCounterOffset:headerCounterOffset+headerCounterLength], counter)
+	return nil
 }
 
 func buildControlRecord(recordType byte, ng *NonceGenerator) ([]byte, error) {

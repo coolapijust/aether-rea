@@ -13,6 +13,7 @@ type RecordReader struct {
 	reader        io.Reader
 	stash         []byte
 	currentRecord *Record // Keep track of pooled buffer
+	lengthBuf     [4]byte // Reusable buffer for reading record length prefix
 }
 
 // NewRecordReader creates a new record reader with a 1MB buffer.
@@ -59,12 +60,11 @@ func (r *RecordReader) Read(p []byte) (int, error) {
 // ReadNextRecord reads and parses a single record.
 func (r *RecordReader) ReadNextRecord() (*Record, error) {
 	readStart := time.Now()
-	lengthBytes := make([]byte, 4)
-	if _, err := io.ReadFull(r.reader, lengthBytes); err != nil {
+	if _, err := io.ReadFull(r.reader, r.lengthBuf[:]); err != nil {
 		return nil, err
 	}
 
-	totalLength := binary.BigEndian.Uint32(lengthBytes)
+	totalLength := binary.BigEndian.Uint32(r.lengthBuf[:])
 	if totalLength < RecordHeaderLength {
 		return nil, errors.New("invalid record length")
 	}

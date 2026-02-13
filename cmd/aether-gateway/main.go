@@ -374,7 +374,7 @@ func main() {
 		MaxIdleTimeout:                 30 * time.Second,
 		KeepAlivePeriod:                10 * time.Second,
 		Allow0RTT:                      true,
-		MaxIncomingStreams:             1000,
+		MaxIncomingStreams:             2000,
 		InitialStreamReceiveWindow:     windowCfg.InitialStreamReceiveWindow,
 		InitialConnectionReceiveWindow: windowCfg.InitialConnectionReceiveWindow,
 		MaxStreamReceiveWindow:         windowCfg.MaxStreamReceiveWindow,
@@ -835,7 +835,9 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 		flushPending := func() error {
 			for len(pending) > 0 {
 				chunkSize := len(pending)
-				chunkCap := sched.chunkCap
+				// Always use maxPayload (16KB) as the per-record limit.
+				// The adaptive scheduler controls WHEN to flush, not HOW BIG each record is.
+				chunkCap := maxPayload
 				if chunkSize > chunkCap {
 					chunkSize = chunkCap
 				}

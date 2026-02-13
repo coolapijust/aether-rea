@@ -1,0 +1,130 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - 'docs/**'
+      - 'perf-runs/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.tag.outputs.new_tag }}
+    steps:
+      - id: tag
+        run: |
+          # 自动生成基于日期的版本号，如 v5.1.20260213.123
+          TAG="v5.1.$(date +'%Y%m%d').${{ github.run_number }}"
+          echo "new_tag=${TAG}" >> $GITHUB_OUTPUT
+
+  build-gateway:
+    needs: create-tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+            extension: .exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Build Gateway
+        run: |
+          mkdir -p dist
+          export CGO_ENABLED=0
+          export GOOS=${{ matrix.goos }}
+          export GOARCH=${{ matrix.goarch }}
+          OUT="dist/aether-gateway-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.extension }}"
+          go build -trimpath -ldflags="-s -w" -o "${OUT}" ./cmd/aether-gateway
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  build-client:
+    needs: create-tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+            extension: .exe
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Build Client & Core
+        run: |
+          mkdir -p dist
+          export CGO_ENABLED=0
+          export GOOS=${{ matrix.goos }}
+          export GOARCH=${{ matrix.goarch }}
+          
+          # Build aether-client (CLI)
+          go build -trimpath -ldflags="-s -w" -o "dist/aether-client-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.extension }}" ./cmd/aether-client
+          
+          # Build aetherd (Core)
+          go build -trimpath -ldflags="-s -w" -o "dist/aetherd-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.extension }}" ./cmd/aetherd
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  release:
+    needs: [create-tag, build-gateway, build-client]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-dist
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-tag.outputs.tag_name }}
+          name: "Aether-Realist Automated Release ${{ needs.create-tag.outputs.tag_name }}"
+          body: |
+            Performance Optimized Version (V5.1 Update)
+            
+            Changes:
+            - Implementation of zero-allocation protocol headers.
+            - Optimized data path with batch processing.
+            - Enhanced QUIC congestion handling.
+            
+            Build Info:
+            - Go Version: 1.26
+            - Run Number: ${{ github.run_number }}
+          files: all-dist/**
+          generate_release_notes: true
+          draft: false
+          prerelease: false
