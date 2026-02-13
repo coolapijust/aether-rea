@@ -1049,10 +1049,30 @@ show_status() {
     [ -z "$port" ] && port=443
     say ""
     say "${YELLOW}--- $(t "健康检查" "Health Check") ---${NC}"
-    if curl -ksI "https://localhost:${port}/health" | grep -q "200 OK"; then
-        say "${GREEN}[OK] https://localhost:${port}/health${NC}"
+
+    # The gateway might not implement HEAD on /health; avoid false negatives.
+    # Prefer status-code based checks; accept any 2xx/3xx.
+    local hc_path code
+    hc_path="${HEALTH_PATH:-/health}"
+    code="$(curl -ksS -o /dev/null -w "%{http_code}" "https://localhost:${port}${hc_path}" 2>/dev/null || echo 000)"
+    if [[ "$code" =~ ^2|^3 ]]; then
+        say "${GREEN}[OK] https://localhost:${port}${hc_path} (HTTP ${code})${NC}"
+        return 0
+    fi
+
+    # Fallback: check decoy root (/) to distinguish "service down" vs "no /health route".
+    local code_root
+    code_root="$(curl -ksS -o /dev/null -w "%{http_code}" "https://localhost:${port}/" 2>/dev/null || echo 000)"
+    if [[ "$code_root" =~ ^2|^3 ]]; then
+        say "${YELLOW}[WARN] $(t "服务在线，但健康路径返回非 2xx/3xx。" "Service is up, but health path returned non-2xx/3xx.")${NC}"
+        say "${YELLOW}$(t "health 状态码: " "health status: ")${code}${NC} ($(t "路径" "path"): ${hc_path})"
+        say "${GREEN}$(t "根路径状态码: " "root status: ")${code_root}${NC} (/)"
+        say "$(t "建议: 将 HEALTH_PATH 设置为实际健康路径，或忽略此提示。" "Tip: set HEALTH_PATH to the real health endpoint, or ignore this warning.")"
     else
-        say "${RED}[WARN] $(t "健康检查失败，请查看日志。" "Health check failed; check logs.")${NC}"
+        say "${RED}[WARN] $(t "健康检查失败 (服务可能未对本机可用)。" "Health check failed (service may not be reachable locally).")${NC}"
+        say "${YELLOW}$(t "health 状态码: " "health status: ")${code}${NC} ($(t "路径" "path"): ${hc_path})"
+        say "${YELLOW}$(t "根路径状态码: " "root status: ")${code_root}${NC} (/)"
+        say "$(t "查看日志: " "Check logs: ")sudo journalctl -u ${SERVICE_NAME} -n 200 --no-pager"
     fi
 }
 
