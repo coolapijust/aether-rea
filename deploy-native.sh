@@ -13,6 +13,9 @@ log() {
     echo -e "${YELLOW}[native]${NC} $*"
 }
 
+SCRIPT_VERSION="2026-02-13-ffdacbb7"
+log "script_version=${SCRIPT_VERSION}"
+
 # When this script is executed via `curl | bash`, stdin is a pipe so `read -p` sees EOF.
 # Always prefer reading from /dev/tty when available so one-liner installs remain interactive.
 read_tty() {
