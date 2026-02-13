@@ -37,6 +37,8 @@ jobs:
           export GOOS="${{ matrix.goos }}"
           export GOARCH="${{ matrix.goarch }}"
           out="dist/aether-gateway-${GOOS}-${GOARCH}"
+          # Ensure go.sum is complete for release builds.
+          go mod tidy
           go mod download
           go build -trimpath -ldflags="-s -w" -o "${out}" ./cmd/aether-gateway
           sha256sum "${out}" > "${out}.sha256"
@@ -47,4 +49,3 @@ jobs:
           files: |
             dist/aether-gateway-${{ matrix.goos }}-${{ matrix.goarch }}
             dist/aether-gateway-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
-
