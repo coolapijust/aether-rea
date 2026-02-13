@@ -9,8 +9,15 @@ set -Eeuo pipefail
 # Print the failing command and line number. This makes "silent exits" diagnosable over SSH.
 trap 'rc=$?; echo "ERROR: rc=${rc} line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
+# Colors must be defined before any function uses them (set -u would otherwise abort).
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
 log() {
-    echo -e "${YELLOW}[native]${NC} $*"
+    # Under `set -u`, always tolerate missing color vars.
+    echo -e "${YELLOW:-}[native]${NC:-} $*"
 }
 
 SCRIPT_VERSION="2026-02-13-c4ddfdfe"
@@ -52,11 +59,6 @@ read_tty_yn() {
         *)   printf -v "$__var" "%s" "$__default" ;;
     esac
 }
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
 
 echo -e "${GREEN}==============================================${NC}"
 echo -e "${GREEN}   Aether-Realist Native 一键部署工具         ${NC}"
