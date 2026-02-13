@@ -110,24 +110,27 @@ read_tty() {
     local __var="$1"
     local __prompt="$2"
     local __default="${3:-}"
-    local __in=""
+    # IMPORTANT: do not name this variable "__in" because callers like read_tty_yn
+    # pass "__in" as the destination var name; bash's dynamic scoping would then
+    # cause the assignment to target this local variable instead of the caller's.
+    local __val=""
 
     if [ -r /dev/tty ]; then
         # Don't let `read` failure abort the script under `set -e`.
-        read -r -p "$__prompt" __in </dev/tty || true
+        read -r -p "$__prompt" __val </dev/tty || true
     else
-        read -r -p "$__prompt" __in || true
+        read -r -p "$__prompt" __val || true
     fi
 
     # Normalize input:
     # - strip CR (copy/paste from Windows terminals can add it)
     # - trim leading/trailing whitespace so "n " doesn't become "invalid" in yn prompts
-    __in="$(printf "%s" "$__in" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    __val="$(printf "%s" "$__val" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
-    if [ -z "$__in" ]; then
-        __in="$__default"
+    if [ -z "$__val" ]; then
+        __val="$__default"
     fi
-    printf -v "$__var" "%s" "$__in"
+    printf -v "$__var" "%s" "$__val"
 }
 
 read_tty_yn() {
