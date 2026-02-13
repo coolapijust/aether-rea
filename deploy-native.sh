@@ -3,10 +3,15 @@
 # Aether-Realist Native (non-Docker) one-click deploy script
 # Runtime: systemd + local binary
 
-set -euo pipefail
+# -E: inherit ERR trap in functions/command substitutions
+set -Eeuo pipefail
 
 # Print the failing command and line number. This makes "silent exits" diagnosable over SSH.
-trap 'echo "ERROR: line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
+trap 'rc=$?; echo "ERROR: rc=${rc} line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
+
+log() {
+    echo -e "${YELLOW}[native]${NC} $*"
+}
 
 # When this script is executed via `curl | bash`, stdin is a pipe so `read -p` sees EOF.
 # Always prefer reading from /dev/tty when available so one-liner installs remain interactive.
@@ -170,9 +175,11 @@ try_install_from_release() {
     else
         echo -e "${YELLOW}尝试下载预编译网关: latest (linux-${arch})...${NC}"
     fi
-    if ! curl -fsSL "$url" -o "$out"; then
-        # Helpful when curl returns (3): show the exact URL bytes/escapes.
+    # Capture curl error so we can see why it failed over SSH.
+    local curl_err=""
+    if ! curl_err="$(curl -fsSL "$url" -o "$out" 2>&1)"; then
         echo -e "${YELLOW}Release URL (escaped): $(printf %q "$url")${NC}" 1>&2
+        echo -e "${YELLOW}curl error:${NC} $(printf %s "$curl_err" | head -n 3)" 1>&2
         return 1
     fi
     chmod +x "$out"
@@ -514,20 +521,38 @@ EOF
 }
 
 install_or_update_service() {
+    log "step=prereqs"
     ensure_prereqs
+
+    log "step=release_download_or_source_sync"
     # Only fetch source if we might need to build; we try release binary first.
     INSTALLED_FROM_RELEASE=0
-    try_install_from_release || ensure_source
+    if ! try_install_from_release; then
+        log "release download failed, falling back to source sync"
+        ensure_source
+    else
+        log "release download ok"
+    fi
+
+    log "step=cleanup_baks"
     cleanup_legacy_baks
+
+    log "step=env_file"
     ensure_env_file
+
+    log "step=prompt_config"
     prompt_core_config
     # Optional: obtain real cert before generating self-signed.
+    log "step=acme(optional)"
     setup_acme_cert || true
+    log "step=decoy_and_cert"
     prepare_decoy_and_cert
+    log "step=install_binary"
     build_binary
+    log "step=write_systemd"
     write_service
 
-    echo -e "${YELLOW}正在启动/更新服务...${NC}"
+    log "step=systemd_start"
     run_root systemctl daemon-reload
     run_root systemctl enable --now "$SERVICE_NAME"
     run_root systemctl restart "$SERVICE_NAME"
