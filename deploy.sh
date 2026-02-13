@@ -15,27 +15,33 @@ echo -e "${GREEN}==============================================${NC}"
 echo -e "${GREEN}    Aether-Realist V5.1 一键部署工具          ${NC}"
 echo -e "${GREEN}==============================================${NC}"
 
-GITHUB_RAW_BASE="https://raw.githubusercontent.com/coolapijust/Aether-Realist/main"
+# Allow overriding branch/ref for test deployments.
+# Example: DEPLOY_REF=exp/dl-continuity-test ./deploy.sh
+DEPLOY_REF="${DEPLOY_REF:-main}"
+GITHUB_RAW_BASE="https://raw.githubusercontent.com/coolapijust/Aether-Realist/${DEPLOY_REF}"
+# Docker tags cannot contain '/', so branch refs are normalized for image tag use.
+DEFAULT_AETHER_IMAGE_TAG="$(echo "$DEPLOY_REF" | sed 's#[/:@]#-#g' | sed 's/[^A-Za-z0-9_.-]/-/g')"
 
 download_file() {
     local FILE_PATH=$1
     local FORCE_UPDATE=$2
     local URL="$GITHUB_RAW_BASE/$FILE_PATH"
-    
-    if [ -f "$FILE_PATH" ] && [ "$FORCE_UPDATE" = "true" ]; then
-        # 如果是强制更新且文件已存在，先备份
-        mv "$FILE_PATH" "${FILE_PATH}.bak"
-        echo -e "已备份旧的 ${YELLOW}$FILE_PATH${NC} 为 ${YELLOW}${FILE_PATH}.bak${NC}"
+
+    # 历史版本可能遗留 .bak，统一清理，避免误导。
+    if [ -f "${FILE_PATH}.bak" ]; then
+        rm -f "${FILE_PATH}.bak"
     fi
 
-    
+    # 强制更新时直接删除旧文件，不再创建备份。
+    if [ -f "$FILE_PATH" ] && [ "$FORCE_UPDATE" = "true" ]; then
+        rm -f "$FILE_PATH"
+    fi
+
     if [ ! -f "$FILE_PATH" ]; then
         echo -e "正在从 GitHub 获取/更新 ${YELLOW}$FILE_PATH${NC}..."
         mkdir -p "$(dirname "$FILE_PATH")"
         if ! curl -sL "$URL?$(date +%s)" -o "$FILE_PATH"; then
              echo -e "${RED}错误: 下载 $FILE_PATH 失败，请检查网络。${NC}"
-             # 如果下载失败且有备份，还原备份
-             [ -f "${FILE_PATH}.bak" ] && mv "${FILE_PATH}.bak" "$FILE_PATH"
              exit 1
         fi
     fi
@@ -123,6 +129,7 @@ install_service() {
     CURRENT_DOMAIN=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d'=' -f2)
     CURRENT_CADDY_PORT=$(grep "^CADDY_PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
     CURRENT_RECORD_PAYLOAD=$(grep "^RECORD_PAYLOAD_BYTES=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
+    CURRENT_AETHER_IMAGE_TAG=$(grep "^AETHER_IMAGE_TAG=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
     CURRENT_DECOY_PATH=$(grep "^DECOY_PATH=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"[:space:]")
     CURRENT_HOST_CERT_PATH=$(grep "^HOST_CERT_PATH=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"")
     CURRENT_HOST_KEY_PATH=$(grep "^HOST_KEY_PATH=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"")
@@ -148,6 +155,9 @@ install_service() {
         echo -e "${YELLOW}输入无效，回退为默认值 16384。${NC}"
         RECORD_PAYLOAD_BYTES=16384
     fi
+
+    # Image tag: keep existing value if present, otherwise follow DEPLOY_REF.
+    AETHER_IMAGE_TAG="${CURRENT_AETHER_IMAGE_TAG:-$DEFAULT_AETHER_IMAGE_TAG}"
 
     # 交互输入 PSK
     if [ -z "$CURRENT_PSK" ]; then
@@ -419,6 +429,7 @@ EOF
     sed -i "/^CERT_FILE=/d" "$ENV_FILE"
     sed -i "/^KEY_FILE=/d" "$ENV_FILE"
     sed -i "/^RECORD_PAYLOAD_BYTES=/d" "$ENV_FILE"
+    sed -i "/^AETHER_IMAGE_TAG=/d" "$ENV_FILE"
 
     echo "CADDY_SITE_ADDRESS=$CADDY_SITE_ADDRESS" >> "$ENV_FILE"
     echo "CADDY_PORT=${CADDY_PORT:-8080}" >> "$ENV_FILE"
@@ -430,6 +441,7 @@ EOF
     echo "CERT_FILE=$CONTAINER_CERT_PATH" >> "$ENV_FILE"
     echo "KEY_FILE=$CONTAINER_KEY_PATH" >> "$ENV_FILE"
     echo "RECORD_PAYLOAD_BYTES=$RECORD_PAYLOAD_BYTES" >> "$ENV_FILE"
+    echo "AETHER_IMAGE_TAG=$AETHER_IMAGE_TAG" >> "$ENV_FILE"
     
     # 生成 Docker Compose 配置
     echo -e "${YELLOW}生成 Docker Compose 配置...${NC}"
@@ -457,7 +469,7 @@ EOF
     cat > deploy/docker-compose.yml <<EOF
 services:
   aether-gateway-core:
-    image: ghcr.io/coolapijust/aether-realist:main
+    image: ghcr.io/coolapijust/aether-realist:\${AETHER_IMAGE_TAG:-main}
     container_name: aether-gateway-core
     restart: always
     network_mode: "host"
@@ -478,6 +490,13 @@ services:
       - QUIC_INITIAL_CONN_RECV_WINDOW=\${QUIC_INITIAL_CONN_RECV_WINDOW:-}
       - QUIC_MAX_STREAM_RECV_WINDOW=\${QUIC_MAX_STREAM_RECV_WINDOW:-}
       - QUIC_MAX_CONN_RECV_WINDOW=\${QUIC_MAX_CONN_RECV_WINDOW:-}
+      - TCP_TO_WT_ADAPTIVE=\${TCP_TO_WT_ADAPTIVE:-1}
+      - TCP_TO_WT_COALESCE_MS=\${TCP_TO_WT_COALESCE_MS:-}
+      - TCP_TO_WT_FLUSH_THRESHOLD=\${TCP_TO_WT_FLUSH_THRESHOLD:-}
+      - TCP_TO_WT_QUEUE_SIZE=\${TCP_TO_WT_QUEUE_SIZE:-256}
+      - TCP_TO_WT_SCHED_MIN_CHUNK=\${TCP_TO_WT_SCHED_MIN_CHUNK:-4096}
+      - TCP_TO_WT_SCHED_MAX_CHUNK=\${TCP_TO_WT_SCHED_MAX_CHUNK:-16384}
+      - TCP_TO_WT_SCHED_TARGET_WRITE_US=\${TCP_TO_WT_SCHED_TARGET_WRITE_US:-20000}
     cap_add:
       - NET_ADMIN
 EOF

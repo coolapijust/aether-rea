@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log"
 	"sync"
@@ -23,6 +24,11 @@ type SessionConfig struct {
 	MaxPadding     int            `json:"max_padding,omitempty"` // 0-65535, default 0
 	RecordPayloadBytes int        `json:"record_payload_bytes,omitempty"` // data record payload size in bytes
 	AllowInsecure  bool           `json:"allow_insecure"`        // Skip TLS verification
+	SessionPoolMin int            `json:"session_pool_min,omitempty"` // Pre-warmed WT sessions
+	SessionPoolMax int            `json:"session_pool_max,omitempty"` // Reserved max WT sessions
+	PerfCaptureEnabled bool       `json:"perf_capture_enabled,omitempty"` // Write [PERF] logs to file
+	PerfCaptureOnConnect bool     `json:"perf_capture_on_connect,omitempty"` // Capture only when Active
+	PerfLogPath    string         `json:"perf_log_path,omitempty"` // Perf log file path
 	Rotation       RotationConfig `json:"rotation,omitempty"`   // Session rotation policy
 	BypassCN       bool           `json:"bypass_cn"`             // Bypass China sites
 	BlockAds       bool           `json:"block_ads"`             // Block advertisement
@@ -85,6 +91,7 @@ type Core struct {
 	
 	// Internal components (not exposed)
 	sessionMgr   *sessionManager
+	sessionPool  []*sessionManager
 	socksServer  *socks5Server
 	httpProxyServer *HttpProxyServer
 	metrics      *Metrics
@@ -158,6 +165,7 @@ func (c *Core) Start(config SessionConfig) error {
 	c.mu.Lock()
 	c.config = &config
 	c.mu.Unlock()
+	SetPerfDiagEnabled(config.PerfCaptureEnabled)
 	
 	if err := c.stateMachine.Transition(StateStarting); err != nil {
 		return err
@@ -313,7 +321,13 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 	}
 
 	// Update session manager config if it exists
-	if c.sessionMgr != nil {
+	if len(c.sessionPool) > 0 {
+		for _, sm := range c.sessionPool {
+			if sm != nil {
+				sm.updateConfig(&config)
+			}
+		}
+	} else if c.sessionMgr != nil {
 		c.sessionMgr.updateConfig(&config)
 	}
 
@@ -325,6 +339,7 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 	addressChanged := oldListenAddr != "" && (oldListenAddr != config.ListenAddr || oldHttpAddr != config.HttpProxyAddr)
 	needsProxyRefresh := c.systemProxyEnabled && oldListenAddr != config.ListenAddr
 	c.mu.Unlock()
+	SetPerfDiagEnabled(config.PerfCaptureEnabled)
 	
 	if needsProxyRefresh {
 		c.SetSystemProxy(true)
@@ -526,10 +541,33 @@ func (c *Core) initialize() error {
 	}
 
 	log.Printf("[DEBUG] Initializing session manager")
-	c.sessionMgr = newSessionManager(c.config, c.emit, c.metrics)
-	if err := c.sessionMgr.initialize(); err != nil {
-		return err
+	poolMin := c.config.SessionPoolMin
+	poolMax := c.config.SessionPoolMax
+	if poolMin <= 0 {
+		poolMin = 1
 	}
+	if poolMax <= 0 {
+		poolMax = poolMin
+	}
+	if poolMin > poolMax {
+		poolMin = poolMax
+	}
+	if poolMin > 8 {
+		poolMin = 8
+	}
+	c.sessionPool = make([]*sessionManager, 0, poolMin)
+	for i := 0; i < poolMin; i++ {
+		sm := newSessionManager(c.config, c.emit, c.metrics)
+		if err := sm.initialize(); err != nil {
+			return err
+		}
+		c.sessionPool = append(c.sessionPool, sm)
+	}
+	if len(c.sessionPool) == 0 {
+		return fmt.Errorf("failed to initialize session pool")
+	}
+	c.sessionMgr = c.sessionPool[0]
+	log.Printf("[DEBUG] Session pool initialized: min=%d max=%d", poolMin, poolMax)
 
 	log.Printf("[DEBUG] Starting SOCKS5 server on %s", c.config.ListenAddr)
 	c.socksServer = newSocks5Server(c.config.ListenAddr, c)
@@ -550,8 +588,10 @@ func (c *Core) initialize() error {
 	// Connect to upstream (if configured)
 	if c.config.URL != "" {
 		log.Printf("[DEBUG] Connecting to upstream: %s", c.config.URL)
-		if err := c.sessionMgr.connect(); err != nil {
-			return err
+		for idx, sm := range c.sessionPool {
+			if err := sm.connect(); err != nil {
+				return fmt.Errorf("session pool connect failed on index %d: %w", idx, err)
+			}
 		}
 	}
 
@@ -580,8 +620,17 @@ func (c *Core) cleanup() {
 	if c.httpProxyServer != nil {
 		c.httpProxyServer.Stop()
 	}
-	if c.sessionMgr != nil {
+	if len(c.sessionPool) > 0 {
+		for _, sm := range c.sessionPool {
+			if sm != nil {
+				sm.close("cleanup")
+			}
+		}
+		c.sessionPool = nil
+		c.sessionMgr = nil
+	} else if c.sessionMgr != nil {
 		c.sessionMgr.close("cleanup")
+		c.sessionMgr = nil
 	}
 
 	for id, s := range c.activeStreams {
@@ -599,9 +648,28 @@ func (c *Core) performRotation() error {
 	return c.sessionMgr.rotate()
 }
 
+func (c *Core) pickSessionManager(target TargetAddress) *sessionManager {
+	if len(c.sessionPool) == 0 {
+		return c.sessionMgr
+	}
+	if len(c.sessionPool) == 1 {
+		return c.sessionPool[0]
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(target.Host))
+	_, _ = h.Write([]byte(":"))
+	_, _ = h.Write([]byte(fmt.Sprintf("%d", target.Port)))
+	idx := int(h.Sum32()) % len(c.sessionPool)
+	return c.sessionPool[idx]
+}
+
 // openStreamInternal creates a stream (protocol internal).
 func (c *Core) openStreamInternal(target TargetAddress, options map[string]interface{}) (StreamHandle, error) {
-	stream, streamID, err := c.sessionMgr.OpenStream(c.ctx)
+	sm := c.pickSessionManager(target)
+	if sm == nil {
+		return StreamHandle{}, fmt.Errorf("no available session manager")
+	}
+	stream, streamID, err := sm.OpenStream(c.ctx)
 	if err != nil {
 		log.Printf("[DEBUG] Open stream to %s:%d failed: %v", target.Host, target.Port, err)
 		return StreamHandle{}, err
@@ -613,7 +681,7 @@ func (c *Core) openStreamInternal(target TargetAddress, options map[string]inter
 		maxPadding = uint16(v)
 	}
 
-	metaRecord, err := BuildMetadataRecord(target.Host, uint16(target.Port), maxPadding, c.config.PSK, c.sessionMgr.nonceGen)
+	metaRecord, err := BuildMetadataRecord(target.Host, uint16(target.Port), maxPadding, c.config.PSK, sm.nonceGen)
 	if err != nil {
 		stream.Close()
 		return StreamHandle{}, err
@@ -626,7 +694,7 @@ func (c *Core) openStreamInternal(target TargetAddress, options map[string]inter
 
 	// Wrap the stream in a RecordReadWriter to handle data-phase encapsulation
 	// V5: Pass NonceGenerator for counter-based nonce
-	wrappedStream := NewRecordReadWriter(stream, maxPadding, c.sessionMgr.nonceGen)
+	wrappedStream := NewRecordReadWriter(stream, maxPadding, sm.nonceGen)
 
 	id := fmt.Sprintf("str-%d-%d", streamID, time.Now().UnixNano())
 	handle := StreamHandle{ID: id}

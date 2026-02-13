@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	perfDiagEnabled  bool
+	perfDiagEnabled  atomic.Bool
 	perfDiagInterval = 10 * time.Second
 
 	downReadCount atomic.Uint64
@@ -21,6 +21,9 @@ var (
 
 	downDecryptCount atomic.Uint64
 	downDecryptNanos atomic.Uint64
+
+	downConsumerGapCount atomic.Uint64
+	downConsumerGapNanos atomic.Uint64
 
 	upWriteCount atomic.Uint64
 	upWriteBytes atomic.Uint64
@@ -38,6 +41,8 @@ type perfSnapshot struct {
 	downParseNanos   uint64
 	downDecryptCount uint64
 	downDecryptNanos uint64
+	downConsumerGapCount uint64
+	downConsumerGapNanos uint64
 	upWriteCount     uint64
 	upWriteBytes     uint64
 	upWriteNanos     uint64
@@ -46,16 +51,13 @@ type perfSnapshot struct {
 }
 
 func init() {
-	perfDiagEnabled = os.Getenv("PERF_DIAG_ENABLE") == "1"
-	if !perfDiagEnabled {
-		return
-	}
+	perfDiagEnabled.Store(os.Getenv("PERF_DIAG_ENABLE") == "1")
 	if v := os.Getenv("PERF_DIAG_INTERVAL_SEC"); v != "" {
 		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
 			perfDiagInterval = time.Duration(sec) * time.Second
 		}
 	}
-	log.Printf("[PERF] enabled=true interval=%s", perfDiagInterval)
+	log.Printf("[PERF] enabled=%t interval=%s", perfDiagEnabled.Load(), perfDiagInterval)
 	go runPerfDiagReporter(perfDiagInterval)
 }
 
@@ -65,10 +67,19 @@ func runPerfDiagReporter(interval time.Duration) {
 
 	prev := currentPerfSnapshot()
 	for range ticker.C {
+		if !perfDiagEnabled.Load() {
+			prev = currentPerfSnapshot()
+			continue
+		}
 		cur := currentPerfSnapshot()
 		logPerfDelta(interval, prev, cur)
 		prev = cur
 	}
+}
+
+// SetPerfDiagEnabled toggles perf diagnostics at runtime.
+func SetPerfDiagEnabled(enabled bool) {
+	perfDiagEnabled.Store(enabled)
 }
 
 func currentPerfSnapshot() perfSnapshot {
@@ -80,6 +91,8 @@ func currentPerfSnapshot() perfSnapshot {
 		downParseNanos:   downParseNanos.Load(),
 		downDecryptCount: downDecryptCount.Load(),
 		downDecryptNanos: downDecryptNanos.Load(),
+		downConsumerGapCount: downConsumerGapCount.Load(),
+		downConsumerGapNanos: downConsumerGapNanos.Load(),
 		upWriteCount:     upWriteCount.Load(),
 		upWriteBytes:     upWriteBytes.Load(),
 		upWriteNanos:     upWriteNanos.Load(),
@@ -96,6 +109,8 @@ func logPerfDelta(interval time.Duration, prev, cur perfSnapshot) {
 	downParseNs := cur.downParseNanos - prev.downParseNanos
 	downDecCalls := cur.downDecryptCount - prev.downDecryptCount
 	downDecNs := cur.downDecryptNanos - prev.downDecryptNanos
+	downConsumerGapCalls := cur.downConsumerGapCount - prev.downConsumerGapCount
+	downConsumerGapNs := cur.downConsumerGapNanos - prev.downConsumerGapNanos
 
 	upWrites := cur.upWriteCount - prev.upWriteCount
 	upBytes := cur.upWriteBytes - prev.upWriteBytes
@@ -110,13 +125,14 @@ func logPerfDelta(interval time.Duration, prev, cur perfSnapshot) {
 	downReadAvgUs := avgMicros(downReadNs, downReads)
 	downParseAvgUs := avgMicros(downParseNs, downParseCalls)
 	downDecAvgUs := avgMicros(downDecNs, downDecCalls)
+	downConsumerGapAvgUs := avgMicros(downConsumerGapNs, downConsumerGapCalls)
 	upWriteAvgUs := avgMicros(upWriteNs, upWrites)
 	upBuildAvgUs := avgMicros(upBuildNs, upBuildCalls)
 
 	log.Printf(
-		"[PERF] window=%s down{mbps=%.2f rps=%d read_us=%.1f parse_us=%.1f dec_us=%.1f} up{mbps=%.2f wps=%d build_us=%.1f write_us=%.1f}",
+		"[PERF] window=%s down{mbps=%.2f rps=%d read_us=%.1f parse_us=%.1f dec_us=%.1f pull_gap_us=%.1f} up{mbps=%.2f wps=%d build_us=%.1f write_us=%.1f}",
 		interval,
-		downMbps, downReads, downReadAvgUs, downParseAvgUs, downDecAvgUs,
+		downMbps, downReads, downReadAvgUs, downParseAvgUs, downDecAvgUs, downConsumerGapAvgUs,
 		upMbps, upWrites, upBuildAvgUs, upWriteAvgUs,
 	)
 }
@@ -129,7 +145,7 @@ func avgMicros(totalNs, calls uint64) float64 {
 }
 
 func perfObserveDownRead(bytes int, d time.Duration) {
-	if !perfDiagEnabled {
+	if !perfDiagEnabled.Load() {
 		return
 	}
 	downReadCount.Add(1)
@@ -138,7 +154,7 @@ func perfObserveDownRead(bytes int, d time.Duration) {
 }
 
 func perfObserveDownParse(d time.Duration) {
-	if !perfDiagEnabled {
+	if !perfDiagEnabled.Load() {
 		return
 	}
 	downParseCount.Add(1)
@@ -146,15 +162,26 @@ func perfObserveDownParse(d time.Duration) {
 }
 
 func perfObserveDownDecrypt(d time.Duration) {
-	if !perfDiagEnabled {
+	if !perfDiagEnabled.Load() {
 		return
 	}
 	downDecryptCount.Add(1)
 	downDecryptNanos.Add(uint64(d.Nanoseconds()))
 }
 
+func perfObserveDownConsumerGap(d time.Duration) {
+	if !perfDiagEnabled.Load() {
+		return
+	}
+	if d <= 0 {
+		return
+	}
+	downConsumerGapCount.Add(1)
+	downConsumerGapNanos.Add(uint64(d.Nanoseconds()))
+}
+
 func perfObserveUpBuild(d time.Duration) {
-	if !perfDiagEnabled {
+	if !perfDiagEnabled.Load() {
 		return
 	}
 	upBuildCount.Add(1)
@@ -162,11 +189,10 @@ func perfObserveUpBuild(d time.Duration) {
 }
 
 func perfObserveUpWrite(bytes int, d time.Duration) {
-	if !perfDiagEnabled {
+	if !perfDiagEnabled.Load() {
 		return
 	}
 	upWriteCount.Add(1)
 	upWriteBytes.Add(uint64(bytes))
 	upWriteNanos.Add(uint64(d.Nanoseconds()))
 }
-

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/armon/go-socks5"
@@ -162,14 +163,20 @@ type streamConn struct {
 	local  net.Addr
 	remote net.Addr
 	closed bool
+	lastReadEndUnixNano atomic.Int64
 }
 
 func (c *streamConn) Read(p []byte) (int, error) {
+	readStart := time.Now()
+	if prev := c.lastReadEndUnixNano.Load(); prev > 0 {
+		perfObserveDownConsumerGap(readStart.Sub(time.Unix(0, prev)))
+	}
 	stream, ok := c.core.GetUnderlyingStream(c.handle)
 	if !ok {
 		return 0, fmt.Errorf("stream not found")
 	}
 	n, err := stream.Read(p)
+	c.lastReadEndUnixNano.Store(time.Now().UnixNano())
 	if n > 0 && c.core.metrics != nil {
 		c.core.metrics.RecordBytesReceived(uint64(n))
 	}

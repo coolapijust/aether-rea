@@ -252,6 +252,58 @@ export default function Rules() {
                 sx={{ maxWidth: 240 }}
               />
 
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  label="Session Pool Min"
+                  type="number"
+                  value={editingConfig.session_pool_min ?? 4}
+                  onChange={(e) =>
+                    updateEditingConfig({
+                      session_pool_min: Math.max(1, Math.min(8, parseInt(e.target.value || '4')))
+                    })
+                  }
+                  sx={{ maxWidth: 180 }}
+                />
+                <TextField
+                  label="Session Pool Max"
+                  type="number"
+                  value={editingConfig.session_pool_max ?? 8}
+                  onChange={(e) =>
+                    updateEditingConfig({
+                      session_pool_max: Math.max(1, Math.min(8, parseInt(e.target.value || '8')))
+                    })
+                  }
+                  sx={{ maxWidth: 180 }}
+                />
+              </Box>
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={editingConfig.perf_capture_enabled || false}
+                    onChange={(e) => updateEditingConfig({ perf_capture_enabled: e.target.checked })}
+                  />
+                }
+                label={t.rules.label_perf_capture_enabled}
+              />
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={editingConfig.perf_capture_on_connect ?? true}
+                    onChange={(e) => updateEditingConfig({ perf_capture_on_connect: e.target.checked })}
+                  />
+                }
+                label={t.rules.label_perf_capture_on_connect}
+              />
+
+              <TextField
+                label={t.rules.label_perf_log_path}
+                value={editingConfig.perf_log_path ?? 'logs/perf/client-perf.log'}
+                onChange={(e) => updateEditingConfig({ perf_log_path: e.target.value })}
+                fullWidth
+              />
+
               <FormControlLabel
                 control={
                   <Switch

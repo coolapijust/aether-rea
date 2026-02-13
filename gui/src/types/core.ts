@@ -130,6 +130,11 @@ export interface CoreConfig {
   max_padding: number;
   record_payload_bytes?: number;
   allow_insecure?: boolean;
+  session_pool_min?: number;
+  session_pool_max?: number;
+  perf_capture_enabled?: boolean;
+  perf_capture_on_connect?: boolean;
+  perf_log_path?: string;
   rotation: {
     enabled: boolean;
     min_interval_ms: number;

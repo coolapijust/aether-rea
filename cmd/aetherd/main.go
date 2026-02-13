@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -74,6 +76,8 @@ func main() {
 	coreLogFiltered := util.NewFilteredWriter(c.GetLogWriter(), filters)
 	
 	logWriters := []io.Writer{stdoutFiltered, coreLogFiltered}
+	perfWriter := newPerfLogFileWriter(c, cm)
+	logWriters = append(logWriters, perfWriter)
 	if debugLog != nil {
 		debugLogFiltered := util.NewFilteredWriter(debugLog, filters)
 		logWriters = append(logWriters, debugLogFiltered)
@@ -82,6 +86,7 @@ func main() {
 	if debugLog != nil {
 		defer debugLog.Close()
 	}
+	defer perfWriter.Close()
 
 	log.Println("Starting Aether-Realist Daemon...")
 	
@@ -159,4 +164,77 @@ func main() {
 	}
 
 	log.Println("Goodbye")
+}
+
+type perfLogFileWriter struct {
+	core     *core.Core
+	cm       *core.ConfigManager
+	mu       sync.Mutex
+	file     *os.File
+	filePath string
+}
+
+func newPerfLogFileWriter(c *core.Core, cm *core.ConfigManager) *perfLogFileWriter {
+	return &perfLogFileWriter{core: c, cm: cm}
+}
+
+func (w *perfLogFileWriter) Write(p []byte) (int, error) {
+	msg := string(p)
+	if !(strings.Contains(msg, "[PERF]") || strings.Contains(msg, "[PERF-GW]") || strings.Contains(msg, "[PERF-GW2]")) {
+		return len(p), nil
+	}
+
+	cfg := w.core.GetActiveConfig()
+	if cfg == nil || !cfg.PerfCaptureEnabled {
+		return len(p), nil
+	}
+	if cfg.PerfCaptureOnConnect && w.core.GetState() != "Active" {
+		return len(p), nil
+	}
+
+	logPath := strings.TrimSpace(cfg.PerfLogPath)
+	if logPath == "" {
+		logPath = "logs/perf/client-perf.log"
+	}
+	if !filepath.IsAbs(logPath) && w.cm != nil {
+		baseDir := filepath.Dir(w.cm.GetConfigPath())
+		logPath = filepath.Join(baseDir, logPath)
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.file == nil || w.filePath != logPath {
+		if w.file != nil {
+			_ = w.file.Close()
+			w.file = nil
+			w.filePath = ""
+		}
+		if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+			return len(p), nil
+		}
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return len(p), nil
+		}
+		w.file = f
+		w.filePath = logPath
+	}
+
+	if w.file != nil {
+		_, _ = w.file.Write(p)
+	}
+	return len(p), nil
+}
+
+func (w *perfLogFileWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	w.filePath = ""
+	return err
 }

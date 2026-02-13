@@ -18,12 +18,16 @@ Usage:
 
 Presets:
   baseline    Follow WINDOW_PROFILE only (clear QUIC_* overrides)
+  baseline-smooth  baseline + TCP->WT coalescing knobs
+  dl-queue-fixed  Disable adaptive, fixed queue/coalesce/flush for A/B validation
   dl-a        Tuned for downlink test A (6/12/48/64 MB windows)
   dl-b        Tuned for downlink test B (8/16/64/96 MB windows)
   dl-c        Tuned for downlink test C (10/20/96/128 MB windows)
 
 Examples:
   ./deploy/perf-tune.sh apply baseline 16384
+  ./deploy/perf-tune.sh apply baseline-smooth 16384
+  ./deploy/perf-tune.sh apply dl-queue-fixed 16384
   ./deploy/perf-tune.sh apply dl-a 16384
   ./deploy/perf-tune.sh logs 120
   ./deploy/perf-tune.sh run     # schedules background capture; survives SSH disconnect
@@ -73,24 +77,79 @@ apply_preset_env_only() {
       set_or_clear_env "QUIC_INITIAL_CONN_RECV_WINDOW" ""
       set_or_clear_env "QUIC_MAX_STREAM_RECV_WINDOW" ""
       set_or_clear_env "QUIC_MAX_CONN_RECV_WINDOW" ""
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
+      set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
+      set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
+      ;;
+    baseline-smooth)
+      set_or_clear_env "QUIC_INITIAL_STREAM_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_INITIAL_CONN_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_MAX_STREAM_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_MAX_CONN_RECV_WINDOW" ""
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
+      # Keep baseline windows, add mild downlink smoothing knobs.
+      set_env "TCP_TO_WT_COALESCE_MS" "8"
+      set_env "TCP_TO_WT_FLUSH_THRESHOLD" "32768"
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
+      ;;
+    dl-queue-fixed)
+      set_or_clear_env "QUIC_INITIAL_STREAM_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_INITIAL_CONN_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_MAX_STREAM_RECV_WINDOW" ""
+      set_or_clear_env "QUIC_MAX_CONN_RECV_WINDOW" ""
+      set_env "TCP_TO_WT_ADAPTIVE" "0"
+      set_env "TCP_TO_WT_COALESCE_MS" "8"
+      set_env "TCP_TO_WT_FLUSH_THRESHOLD" "12288"
+      set_env "TCP_TO_WT_QUEUE_SIZE" "256"
+      set_env "TCP_TO_WT_SCHED_MIN_CHUNK" "8192"
+      set_env "TCP_TO_WT_SCHED_MAX_CHUNK" "16384"
+      set_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" "20000"
       ;;
     dl-a)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "6291456"
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "12582912"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "50331648"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "67108864"
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
+      set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
+      set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
       ;;
     dl-b)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "8388608"
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "16777216"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "67108864"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "100663296"
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
+      set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
+      set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
       ;;
     dl-c)
       set_env "QUIC_INITIAL_STREAM_RECV_WINDOW" "10485760"
       set_env "QUIC_INITIAL_CONN_RECV_WINDOW" "20971520"
       set_env "QUIC_MAX_STREAM_RECV_WINDOW" "100663296"
       set_env "QUIC_MAX_CONN_RECV_WINDOW" "134217728"
+      set_env "TCP_TO_WT_ADAPTIVE" "1"
+      set_or_clear_env "TCP_TO_WT_COALESCE_MS" ""
+      set_or_clear_env "TCP_TO_WT_FLUSH_THRESHOLD" ""
+      set_or_clear_env "TCP_TO_WT_QUEUE_SIZE" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MIN_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_MAX_CHUNK" ""
+      set_or_clear_env "TCP_TO_WT_SCHED_TARGET_WRITE_US" ""
       ;;
     *)
       echo "ERROR: unknown preset '$preset'"
@@ -103,7 +162,7 @@ apply_preset_env_only() {
 show_status() {
   ensure_env_file
   echo "=== PERF/QUIC current env ==="
-  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW)=" "$ENV_FILE" || true
+  grep -E "^(WINDOW_PROFILE|RECORD_PAYLOAD_BYTES|PERF_DIAG_ENABLE|PERF_DIAG_INTERVAL_SEC|QUIC_INITIAL_STREAM_RECV_WINDOW|QUIC_INITIAL_CONN_RECV_WINDOW|QUIC_MAX_STREAM_RECV_WINDOW|QUIC_MAX_CONN_RECV_WINDOW|TCP_TO_WT_ADAPTIVE|TCP_TO_WT_COALESCE_MS|TCP_TO_WT_FLUSH_THRESHOLD|TCP_TO_WT_QUEUE_SIZE|TCP_TO_WT_SCHED_MIN_CHUNK|TCP_TO_WT_SCHED_MAX_CHUNK|TCP_TO_WT_SCHED_TARGET_WRITE_US)=" "$ENV_FILE" || true
 }
 
 apply_preset() {
@@ -134,8 +193,8 @@ show_logs() {
     exit 1
   fi
 
-  echo "Collecting [PERF]/[PERF-GW] logs for ${seconds}s..."
-  timeout "${seconds}" docker compose -f "$COMPOSE_FILE" logs -f aether-gateway-core 2>&1 | grep -E --line-buffered "\[PERF(-GW)?\]" || true
+  echo "Collecting [PERF]/[PERF-GW]/[PERF-GW2] logs for ${seconds}s..."
+  timeout "${seconds}" docker compose -f "$COMPOSE_FILE" logs -f aether-gateway-core 2>&1 | grep -E --line-buffered "\[(PERF|PERF-GW|PERF-GW2)\]" || true
 }
 
 run_interactive_once() {
@@ -146,16 +205,20 @@ run_interactive_once() {
 
   echo "Select test group:"
   echo "1) baseline"
-  echo "2) dl-a"
-  echo "3) dl-b"
-  echo "4) dl-c"
-  read -rp "Choice [1-4]: " choice
+  echo "2) baseline-smooth"
+  echo "3) dl-queue-fixed"
+  echo "4) dl-a"
+  echo "5) dl-b"
+  echo "6) dl-c"
+  read -rp "Choice [1-6, default 1]: " choice
 
   case "$choice" in
-    1) preset="baseline" ;;
-    2) preset="dl-a" ;;
-    3) preset="dl-b" ;;
-    4) preset="dl-c" ;;
+    ""|1) preset="baseline" ;;
+    2) preset="baseline-smooth" ;;
+    3) preset="dl-queue-fixed" ;;
+    4) preset="dl-a" ;;
+    5) preset="dl-b" ;;
+    6) preset="dl-c" ;;
     *)
       echo "ERROR: invalid choice"
       exit 1
@@ -215,7 +278,7 @@ run_interactive_once() {
 #!/usr/bin/env bash
 set -euo pipefail
 sleep ${start_delay}
-timeout ${seconds} docker compose -f "${COMPOSE_FILE}" logs --since "${since_ts}" -f aether-gateway-core 2>&1 | grep -E --line-buffered "\\[PERF(-GW)?\\]" > "${perf_file}" || true
+timeout ${seconds} docker compose -f "${COMPOSE_FILE}" logs --since "${since_ts}" -f aether-gateway-core 2>&1 | grep -E --line-buffered "\\[(PERF|PERF-GW|PERF-GW2)\\]" > "${perf_file}" || true
 
 {
   echo "preset=${preset}"
@@ -237,10 +300,33 @@ timeout ${seconds} docker compose -f "${COMPOSE_FILE}" logs --since "${since_ts}
         mbps = g[1] + 0
         w = g[2] + 0
         gw_sum += mbps
-        if (mbps > 0.10) { gw_nz++; gw_nzsum += mbps }
+        if (mbps > 0.10) {
+          gw_nz++
+          gw_nzsum += mbps
+          gw_streak++
+          if (gw_streak > gw_max_streak) gw_max_streak = gw_streak
+        } else {
+          gw_streak = 0
+        }
         if (n_gw == 1 || mbps < gw_min) gw_min = mbps
         if (mbps > gw_max) gw_max = mbps
         gw_wsum += w
+      }
+      match(\$0, /dl_stage\{read_wait_us=([0-9.]+).*reads=([0-9]+).*build_us=([0-9.]+).*builds=([0-9]+).*write_block_us=([0-9.]+).*writes=([0-9]+).*flush_avg_bytes=([0-9.]+).*flushes=([0-9]+)/, s) {
+        n_gw2++
+        gw2_read_wait_us_sum += (s[1] + 0)
+        gw2_reads_sum += (s[2] + 0)
+        gw2_build_us_sum += (s[3] + 0)
+        gw2_builds_sum += (s[4] + 0)
+        gw2_write_block_us_sum += (s[5] + 0)
+        gw2_writes_sum += (s[6] + 0)
+        gw2_flush_avg_bytes_sum += (s[7] + 0)
+        gw2_flushes_sum += (s[8] + 0)
+      }
+      match(\$0, /dl_stage\{.*chunk_cap_avg_bytes=([0-9.]+).*coalesce_wait_avg_us=([0-9.]+)/, t) {
+        gw2_chunk_cap_avg_bytes_sum += (t[1] + 0)
+        gw2_coalesce_wait_avg_us_sum += (t[2] + 0)
+        gw2_tuned_points++
       }
       END {
         printf "points_total=%d\n", n_core + n_gw
@@ -259,6 +345,23 @@ timeout ${seconds} docker compose -f "${COMPOSE_FILE}" logs --since "${since_ts}
           printf "gw_dl_nonzero_points=%d\n", gw_nz
           if (gw_nz > 0) printf "gw_dl_nonzero_avg_mbps=%.3f\n", gw_nzsum / gw_nz
           printf "gw_dl_avg_write_us=%.1f\n", gw_wsum / n_gw
+          printf "gw_dl_max_nonzero_streak=%d\n", gw_max_streak
+          if (gw_max_streak >= 6) print "gw_dl_is_continuous6=yes"; else print "gw_dl_is_continuous6=no"
+        }
+        if (n_gw2 > 0) {
+          printf "gw2_points=%d\n", n_gw2
+          printf "gw2_avg_read_wait_us=%.1f\n", gw2_read_wait_us_sum / n_gw2
+          printf "gw2_avg_reads=%.1f\n", gw2_reads_sum / n_gw2
+          printf "gw2_avg_build_us=%.1f\n", gw2_build_us_sum / n_gw2
+          printf "gw2_avg_builds=%.1f\n", gw2_builds_sum / n_gw2
+          printf "gw2_avg_write_block_us=%.1f\n", gw2_write_block_us_sum / n_gw2
+          printf "gw2_avg_writes=%.1f\n", gw2_writes_sum / n_gw2
+          printf "gw2_avg_flush_bytes=%.1f\n", gw2_flush_avg_bytes_sum / n_gw2
+          printf "gw2_avg_flushes=%.1f\n", gw2_flushes_sum / n_gw2
+          if (gw2_tuned_points > 0) {
+            printf "gw2_avg_chunk_cap_avg_bytes=%.1f\n", gw2_chunk_cap_avg_bytes_sum / gw2_tuned_points
+            printf "gw2_avg_coalesce_wait_avg_us=%.1f\n", gw2_coalesce_wait_avg_us_sum / gw2_tuned_points
+          }
         }
         if (n_core == 0 && n_gw == 0) {
           print "points=0"
@@ -302,9 +405,10 @@ matrix_plan() {
   cat <<'EOF'
 Recommended matrix order:
 1) ./deploy/perf-tune.sh apply baseline 16384
-2) ./deploy/perf-tune.sh apply dl-a 16384
-3) ./deploy/perf-tune.sh apply dl-b 16384
-4) ./deploy/perf-tune.sh apply dl-c 16384
+2) ./deploy/perf-tune.sh apply dl-queue-fixed 16384
+3) ./deploy/perf-tune.sh apply dl-a 16384
+4) ./deploy/perf-tune.sh apply dl-b 16384
+5) ./deploy/perf-tune.sh apply dl-c 16384
 
 For each step:
 1) Run 3 rounds of speed test
