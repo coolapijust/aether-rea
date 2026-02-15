@@ -947,6 +947,30 @@ WantedBy=multi-user.target
 EOF
 }
 
+install_alias() {
+    local alias_path="/usr/local/bin/aether"
+    local script_abs_path
+    script_abs_path="$(readlink -f "$0")"
+
+    # Don't try to link if we are running from a temporary location
+    if [[ "$script_abs_path" == /tmp/* ]]; then
+        return 0
+    fi
+
+    # Detect if we are already linked correctly to avoid redundant sudo prompts
+    if [ -L "$alias_path" ] && [ "$(readlink -f "$alias_path")" == "$script_abs_path" ]; then
+        return 0
+    fi
+
+    say ""
+    say "${YELLOW}$(t "正在配置系统快捷指令 (aether)..." "Configuring system shortcut (aether)...")${NC}"
+    if run_root ln -sf "$script_abs_path" "$alias_path"; then
+        say "${GREEN}[OK] $(t "快捷指令已创建。现在在任何地方输入 'aether' 即可打开管理菜单。" "Shortcut created. Type 'aether' anywhere to open the management menu.")${NC}"
+    else
+        say "${RED}[ERROR] $(t "创建快捷指令失败，请手动执行: sudo ln -sf $script_abs_path $alias_path" "Failed to create shortcut. Manual: sudo ln -sf $script_abs_path $alias_path")${NC}"
+    fi
+}
+
 install_or_update_service() {
     # Keep in sync with the number of `step "..."` calls below.
     step_total=13
@@ -1034,6 +1058,8 @@ install_or_update_service() {
     run_root systemctl daemon-reload
     run_root systemctl enable --now "$SERVICE_NAME"
     run_root systemctl restart "$SERVICE_NAME"
+
+    install_alias
 
     say ""
     say "${GREEN}$(t "部署完成。" "Deployment complete.")${NC}"

@@ -22,6 +22,11 @@ GITHUB_RAW_BASE="https://raw.githubusercontent.com/coolapijust/Aether-Realist/${
 # Docker tags cannot contain '/', so branch refs are normalized for image tag use.
 DEFAULT_AETHER_IMAGE_TAG="$(echo "$DEPLOY_REF" | sed 's#[/:@]#-#g' | sed 's/[^A-Za-z0-9_.-]/-/g')"
 
+# 获取脚本所在目录的绝对路径，确保从任何地方运行都能找到配置文件
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/deploy/.env"
+COMPOSE_FILE="${SCRIPT_DIR}/deploy/docker-compose.yml"
+
 download_file() {
     local FILE_PATH=$1
     local FORCE_UPDATE=$2
@@ -118,16 +123,16 @@ port_in_use() {
 }
 
 acme_bin() {
-    echo "deploy/acme-home/.acme.sh/acme.sh"
+    echo "${SCRIPT_DIR}/deploy/acme-home/.acme.sh/acme.sh"
 }
 
 ensure_acme_sh() {
-    mkdir -p deploy/acme-home
+    mkdir -p "${SCRIPT_DIR}/deploy/acme-home"
     if [ -x "$(acme_bin)" ]; then
         return 0
     fi
     echo -e "${YELLOW}正在安装 acme.sh...${NC}"
-    (export HOME="$(pwd)/deploy/acme-home"; curl -fsSL https://get.acme.sh | sh)
+    (export HOME="${SCRIPT_DIR}/deploy/acme-home"; curl -fsSL https://get.acme.sh | sh)
     if [ ! -x "$(acme_bin)" ]; then
         echo -e "${RED}错误: acme.sh 安装失败。${NC}"
         return 1
@@ -150,9 +155,9 @@ setup_acme_cert_docker() {
         return 1
     fi
 
-    mkdir -p deploy/certs
-    local CERT_PATH="$(pwd)/deploy/certs/server.crt"
-    local KEY_PATH="$(pwd)/deploy/certs/server.key"
+    mkdir -p "${SCRIPT_DIR}/deploy/certs"
+    local CERT_PATH="${SCRIPT_DIR}/deploy/certs/server.crt"
+    local KEY_PATH="${SCRIPT_DIR}/deploy/certs/server.key"
 
     echo -e "${YELLOW}ACME: 申请/更新证书 (mode=${MODE})...${NC}"
 
@@ -164,20 +169,20 @@ setup_acme_cert_docker() {
             echo -e "  2) 设置 ACME_MODE=alpn-stop (会短暂停止容器占用 443 走 TLS-ALPN-01)"
             return 1
         fi
-        (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --set-default-ca --server "$CA" >/dev/null 2>&1 || true)
-        (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --issue -d "$DOMAIN_FOR_ACME" --standalone --keylength "$KEYLENGTH")
+        (export HOME="${SCRIPT_DIR}/deploy/acme-home"; "$(acme_bin)" --set-default-ca --server "$CA" >/dev/null 2>&1 || true)
+        (export HOME="${SCRIPT_DIR}/deploy/acme-home"; "$(acme_bin)" --issue -d "$DOMAIN_FOR_ACME" --standalone --keylength "$KEYLENGTH")
     elif [ "$MODE" = "alpn-stop" ]; then
         echo -e "${YELLOW}ACME: alpn-stop 将短暂停止容器以释放 443...${NC}"
-        docker compose -f deploy/docker-compose.yml stop >/dev/null 2>&1 || true
-        (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --set-default-ca --server "$CA" >/dev/null 2>&1 || true)
-        (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --issue -d "$DOMAIN_FOR_ACME" --alpn --keylength "$KEYLENGTH")
-        docker compose -f deploy/docker-compose.yml up -d >/dev/null 2>&1 || true
+        docker compose -f "$COMPOSE_FILE" stop >/dev/null 2>&1 || true
+        (export HOME="${SCRIPT_DIR}/deploy/acme-home"; "$(acme_bin)" --set-default-ca --server "$CA" >/dev/null 2>&1 || true)
+        (export HOME="${SCRIPT_DIR}/deploy/acme-home"; "$(acme_bin)" --issue -d "$DOMAIN_FOR_ACME" --alpn --keylength "$KEYLENGTH")
+        docker compose -f "$COMPOSE_FILE" up -d >/dev/null 2>&1 || true
     else
         echo -e "${RED}ACME: 未知模式 ACME_MODE=$MODE${NC}"
         return 1
     fi
 
-    (export HOME="$(pwd)/deploy/acme-home"; "$(acme_bin)" --install-cert -d "$DOMAIN_FOR_ACME" \
+    (export HOME="${SCRIPT_DIR}/deploy/acme-home"; "$(acme_bin)" --install-cert -d "$DOMAIN_FOR_ACME" \
         --fullchain-file "$CERT_PATH" \
         --key-file "$KEY_PATH" \
         --reloadcmd "docker kill -s HUP aether-gateway-core")
@@ -195,18 +200,17 @@ install_service() {
     fi
 
     echo -e "\n${YELLOW}[2/4] 准备工作目录与依赖...${NC}"
-    mkdir -p deploy/certs
-    chmod 755 deploy/certs
+    mkdir -p "${SCRIPT_DIR}/deploy/certs"
+    chmod 755 "${SCRIPT_DIR}/deploy/certs"
 
     # 强制更新编排文件
     download_file "deploy/docker-compose.yml" "true"
     download_file "deploy/.env.example" "false"
 
     echo -e "\n${YELLOW}[3/4] 配置环境变量...${NC}"
-    ENV_FILE="deploy/.env"
     if [ ! -f "$ENV_FILE" ]; then
-        if [ -f "deploy/.env.example" ]; then
-            cp deploy/.env.example "$ENV_FILE"
+        if [ -f "${SCRIPT_DIR}/deploy/.env.example" ]; then
+            cp "${SCRIPT_DIR}/deploy/.env.example" "$ENV_FILE"
         else
             touch "$ENV_FILE"
         fi
@@ -373,7 +377,7 @@ install_service() {
     fi
 
     HAS_EXISTING_CERT=0
-    if [ -f "deploy/certs/server.crt" ] && [ -f "deploy/certs/server.key" ]; then
+    if [ -f "${SCRIPT_DIR}/deploy/certs/server.crt" ] && [ -f "${SCRIPT_DIR}/deploy/certs/server.key" ]; then
         HAS_EXISTING_CERT=1
     elif [ -n "$CURRENT_HOST_CERT_PATH" ] && [ -n "$CURRENT_HOST_KEY_PATH" ] && [ -f "$CURRENT_HOST_CERT_PATH" ] && [ -f "$CURRENT_HOST_KEY_PATH" ]; then
         HAS_EXISTING_CERT=1
@@ -383,7 +387,7 @@ install_service() {
     if [ "$ACME_ENABLE" = "1" ] && [ "$HAS_EXISTING_CERT" = "0" ]; then
         DOMAIN_FOR_ACME=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d'=' -f2 | tr -d "'\"")
         setup_acme_cert_docker "$DOMAIN_FOR_ACME" "$ACME_MODE" "$ACME_CA" "$ACME_KEYLENGTH" || true
-        if [ -f "deploy/certs/server.crt" ] && [ -f "deploy/certs/server.key" ]; then
+        if [ -f "${SCRIPT_DIR}/deploy/certs/server.crt" ] && [ -f "${SCRIPT_DIR}/deploy/certs/server.key" ]; then
             HAS_EXISTING_CERT=1
         fi
     fi
@@ -397,7 +401,7 @@ install_service() {
     fi
 
     if [ "$REUSE_EXISTING_CONFIG" = "y" ]; then
-        DECOY_PATH=${CURRENT_DECOY_PATH:-deploy/decoy}
+        DECOY_PATH=${CURRENT_DECOY_PATH:-"${SCRIPT_DIR}/deploy/decoy"}
         HOST_CERT_PATH="$CURRENT_HOST_CERT_PATH"
         HOST_KEY_PATH="$CURRENT_HOST_KEY_PATH"
         CONTAINER_CERT_PATH=${CURRENT_CERT_FILE:-/certs/server.crt}
@@ -412,14 +416,14 @@ install_service() {
             CONTAINER_KEY_PATH="/certs/server.key"
         fi
 
-        if [ -z "$HOST_CERT_PATH" ] && { [ ! -f "deploy/certs/server.crt" ] || [ ! -f "deploy/certs/server.key" ]; }; then
+        if [ -z "$HOST_CERT_PATH" ] && { [ ! -f "${SCRIPT_DIR}/deploy/certs/server.crt" ] || [ ! -f "${SCRIPT_DIR}/deploy/certs/server.key" ]; }; then
             DOMAIN_FOR_CERT=$(echo "${DOMAIN:-$CURRENT_DOMAIN}" | tr -d "'\"")
             [ -z "$DOMAIN_FOR_CERT" ] && DOMAIN_FOR_CERT="localhost"
             echo -e "${YELLOW}未找到可复用证书，正在自动生成 10 年期自签名证书...${NC}"
-            mkdir -p deploy/certs
+            mkdir -p "${SCRIPT_DIR}/deploy/certs"
             openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-                -keyout deploy/certs/server.key \
-                -out deploy/certs/server.crt \
+                -keyout "${SCRIPT_DIR}/deploy/certs/server.key" \
+                -out "${SCRIPT_DIR}/deploy/certs/server.crt" \
                 -subj "/CN=$DOMAIN_FOR_CERT" &> /dev/null
             echo -e "${GREEN}自签名证书已生成。${NC}"
         fi
@@ -439,7 +443,7 @@ install_service() {
         # 伪装引擎逻辑
         setup_decoy() {
             local TEMPLATE_TYPE="$1"
-            local DEST_DIR="deploy/decoy"
+            local DEST_DIR="${SCRIPT_DIR}/deploy/decoy"
             
             # [优化] 检测已有站点，支持更新时跳过
             if [ -f "$DEST_DIR/index.html" ]; then
@@ -485,8 +489,8 @@ EOF
             4) 
                 read -p "请输入 Git 仓库地址: " GIT_REPO
                 if [ -n "$GIT_REPO" ]; then
-                    rm -rf deploy/decoy
-                    git clone --depth 1 "$GIT_REPO" deploy/decoy
+                    rm -rf "${SCRIPT_DIR}/deploy/decoy"
+                    git clone --depth 1 "$GIT_REPO" "${SCRIPT_DIR}/deploy/decoy"
                     echo -e "${GREEN}自定义站点已克隆。${NC}"
                 fi
                 ;;
@@ -512,7 +516,7 @@ EOF
 
         case $CERT_OPT in
             2)
-                if [ -f "deploy/certs/server.crt" ] && [ -f "deploy/certs/server.key" ]; then
+                if [ -f "${SCRIPT_DIR}/deploy/certs/server.crt" ] && [ -f "${SCRIPT_DIR}/deploy/certs/server.key" ]; then
                     echo -e "${GREEN}使用 deploy/certs 证书。${NC}"
                 else
                     echo -e "${RED}未找到 deploy/certs 下的证书，将回退到自签名。${NC}"
@@ -537,14 +541,14 @@ EOF
         esac
 
         if [ "$CERT_OPT" = "1" ]; then
-            if [ ! -f "deploy/certs/server.crt" ]; then
+            if [ ! -f "${SCRIPT_DIR}/deploy/certs/server.crt" ]; then
                 DOMAIN_FOR_CERT=$(echo "${DOMAIN:-$CURRENT_DOMAIN}" | tr -d "'\"")
                 [ -z "$DOMAIN_FOR_CERT" ] && DOMAIN_FOR_CERT="localhost"
                 echo -e "${YELLOW}正在生成 10 年期自签名证书...${NC}"
-                mkdir -p deploy/certs
+                mkdir -p "${SCRIPT_DIR}/deploy/certs"
                 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-                    -keyout deploy/certs/server.key \
-                    -out deploy/certs/server.crt \
+                    -keyout "${SCRIPT_DIR}/deploy/certs/server.key" \
+                    -out "${SCRIPT_DIR}/deploy/certs/server.crt" \
                     -subj "/CN=$DOMAIN_FOR_CERT" &> /dev/null
                 echo -e "${GREEN}自签名证书已生成。${NC}"
             else
@@ -566,7 +570,7 @@ EOF
 
     echo "CADDY_SITE_ADDRESS=$CADDY_SITE_ADDRESS" >> "$ENV_FILE"
     echo "CADDY_PORT=${CADDY_PORT:-8080}" >> "$ENV_FILE"
-    echo "DECOY_PATH=${DECOY_PATH:-deploy/decoy}" >> "$ENV_FILE"
+    echo "DECOY_PATH=${DECOY_PATH:-${SCRIPT_DIR}/deploy/decoy}" >> "$ENV_FILE"
     # 保存绝对路径供 compose 使用
     echo "HOST_CERT_PATH=$HOST_CERT_PATH" >> "$ENV_FILE"
     echo "HOST_KEY_PATH=$HOST_KEY_PATH" >> "$ENV_FILE"
@@ -580,10 +584,10 @@ EOF
     echo -e "${YELLOW}生成 Docker Compose 配置...${NC}"
     
     # [Fix] 处理 Docker Compose 相对路径问题 (Must start with ./)
-    # 如果 DECOY_PATH 是默认值 "deploy/decoy" (相对于项目根目录)，
+    # 如果 DECOY_PATH 是默认值 (相对于项目根目录)，
     # 在 deploy/docker-compose.yml 的上下文中，它应该是 "./decoy"
-    COMPOSE_DECOY_PATH="${DECOY_PATH:-deploy/decoy}"
-    if [ "$COMPOSE_DECOY_PATH" == "deploy/decoy" ]; then
+    COMPOSE_DECOY_PATH="${DECOY_PATH:-${SCRIPT_DIR}/deploy/decoy}"
+    if [ "$COMPOSE_DECOY_PATH" == "${SCRIPT_DIR}/deploy/decoy" ]; then
         COMPOSE_DECOY_PATH="./decoy"
     fi
 
@@ -710,11 +714,13 @@ EOF
     resolve_port_conflict "${CADDY_PORT:-443}"
 
     echo -e "\n${YELLOW}正在获取最新镜像 (V5.1 Optimized)...${NC}"
-    docker compose -f deploy/docker-compose.yml pull
+    docker compose -f "$COMPOSE_FILE" pull
     
     echo -e "\n${YELLOW}正在启动服务 (覆盖式更新)...${NC}"
-    docker compose -f deploy/docker-compose.yml up -d --remove-orphans
+    docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
     echo -e "${GREEN}服务同步/升级完成！已实现无缝切换。${NC}"
+
+    install_alias
 }
 
 show_status() {
@@ -744,7 +750,7 @@ show_status() {
 
 check_firewall_and_udp() {
     echo -e "\n${YELLOW}--- 网络与防火墙检查 (QUIC/HTTP3) ---${NC}"
-    PORT=$(grep "^CADDY_PORT=" "deploy/.env" | cut -d'=' -f2 | tr -d ':')
+    PORT=$(grep "^CADDY_PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d ':')
     PORT=${PORT:-8080}
 
     # 1. 检查 UDP 监听
@@ -808,7 +814,27 @@ check_time_sync() {
 
 view_logs() {
     echo -e "\n${YELLOW}查看 Aether 核心服务日志...${NC}"
-    docker compose -f deploy/docker-compose.yml logs -f --tail 100
+    docker compose -f "$COMPOSE_FILE" logs -f --tail 100
+}
+
+# ... (other existing functions)
+
+install_alias() {
+    local alias_path="/usr/local/bin/aether-docker"
+    local script_abs_path
+    script_abs_path="$(readlink -f "$0")"
+
+    # 跳过 /tmp 目录下的临时执行
+    if [[ "$script_abs_path" == /tmp/* ]]; then
+        return 0
+    fi
+
+    echo -e "\n${YELLOW}正在配置系统快捷指令 (aether-docker)...${NC}"
+    if sudo ln -sf "$script_abs_path" "$alias_path"; then
+        echo -e "${GREEN}[OK] 快捷指令已创建。现在在任何地方输入 'aether-docker' 即可打开管理菜单。${NC}"
+    else
+        echo -e "${RED}[ERROR] 创建快捷指令失败。${NC}"
+    fi
 }
 
 check_bbr() {
@@ -871,14 +897,14 @@ quick_config() {
     echo -e "${GREEN}配置已更新。${NC}"
     read -p "是否同步重启容器以应用配置? [y/N]: " RESTART_CONFIRM
     if [[ "$RESTART_CONFIRM" =~ ^[Yy]$ ]]; then
-        docker compose -f deploy/docker-compose.yml up -d
+        docker compose -f "$COMPOSE_FILE" up -d
     fi
 }
 
 stop_service() {
     echo -e "\n${YELLOW}正在暂停服务...${NC}"
-    if [ -f "deploy/docker-compose.yml" ]; then
-        docker compose -f deploy/docker-compose.yml stop
+    if [ -f "$COMPOSE_FILE" ]; then
+        docker compose -f "$COMPOSE_FILE" stop
         echo -e "${GREEN}服务已暂停。${NC}"
     else
         echo -e "${RED}错误: 未找到部署文件。${NC}"
@@ -889,8 +915,8 @@ remove_service() {
     echo -e "\n${YELLOW}正在准备卸载 Aether-Realist 服务...${NC}"
     
     # 1. 基础清理：停止并删除容器 (保留数据)
-    if [ -f "deploy/docker-compose.yml" ]; then
-        docker compose -f deploy/docker-compose.yml down -v
+    if [ -f "$COMPOSE_FILE" ]; then
+        docker compose -f "$COMPOSE_FILE" down -v
         echo -e "${GREEN}[OK] Docker 容器、网络与临时卷已清理。${NC}"
         echo -e "${YELLOW}提示: 您的配置文件 (.env) 和证书目录 (certs/) 仍然保留，方便下次快速重新部署。${NC}"
     else
@@ -902,9 +928,9 @@ remove_service() {
     read -p "是否【彻底粉碎】所有数据? (包括域名配置、PSK密钥、SSL证书)? [y/N]: " DESTROY_ALL
     if [[ "$DESTROY_ALL" =~ ^[Yy]$ ]]; then
         echo -e "${RED}正在执行深度清理...${NC}"
-        rm -rf deploy/certs deploy/decoy deploy/.env
+        rm -rf "${SCRIPT_DIR}/deploy/certs" "${SCRIPT_DIR}/deploy/decoy" "$ENV_FILE"
         # 也尝试删除 deploy 目录本身（如果为空）
-        rmdir deploy 2>/dev/null
+        rmdir "${SCRIPT_DIR}/deploy" 2>/dev/null
         echo -e "${GREEN}[OK] 所有配置与数据已永久删除。环境已重置为初始状态。${NC}"
     else
         echo -e "${GREEN}[INFO] 已保留配置文件，您可以随时运行 ./deploy.sh 恢复服务。${NC}"
