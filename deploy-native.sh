@@ -972,9 +972,18 @@ install_alias() {
     local script_abs_path
     script_abs_path="$(readlink -f "$0")"
 
-    # Don't try to link if we are running from a temporary location
-    if [[ "$script_abs_path" == /tmp/* ]]; then
-        return 0
+    # If running from a temporary location (pipe or /tmp), switch to the persistent copy in SRC_DIR
+    if [[ "$script_abs_path" == /tmp/* ]] || [[ "$script_abs_path" == /dev/fd/* ]] || [[ "$script_abs_path" == /proc/* ]]; then
+        if [ -f "${SRC_DIR}/deploy-native.sh" ]; then
+            script_abs_path="${SRC_DIR}/deploy-native.sh"
+            chmod +x "$script_abs_path"
+        else
+            # Fallback: copy self to deploy dir if source is missing (rare)
+            mkdir -p "${AETHER_HOME}/deploy"
+            cp "$0" "${AETHER_HOME}/deploy/manage.sh"
+            script_abs_path="${AETHER_HOME}/deploy/manage.sh"
+            chmod +x "$script_abs_path"
+        fi
     fi
 
     # Detect if we are already linked correctly to avoid redundant sudo prompts
@@ -985,11 +994,11 @@ install_alias() {
     say ""
     say "${YELLOW}$(t "正在配置系统快捷指令 (aether)..." "Configuring system shortcut (aether)...")${NC}"
     if run_root ln -sf "$script_abs_path" "$alias_path"; then
-        say "${GREEN}[OK] $(t "快捷指令已创建。现在在任何地方输入 'aether' 即可打开管理菜单。" "Shortcut created. Type 'aether' anywhere to open the management menu.")${NC}"
+        say "${GREEN}[OK] $(t "快捷指令已创建 [指向 $script_abs_path]。现在在任何地方输入 'aether' 即可打开管理菜单。" "Shortcut created [targets $script_abs_path]. Type 'aether' anywhere to open the management menu.")${NC}"
         
         # Check if /usr/local/bin is in PATH
         if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
-            say "${YELLOW}$(t "提示: /usr/local/bin 不在您的 PATH 中，您可能需要运行: export PATH=\$PATH:/usr/local/bin" "Hint: /usr/local/bin is not in your PATH. You may need to run: export PATH=\$PATH:/usr/local/bin")${NC}"
+            say "${YELLOW}$(t "提示: /usr/local/bin 不在您的 PATH 中，可能需要运行: export PATH=\$PATH:/usr/local/bin" "Hint: /usr/local/bin is not in your PATH. You may need to run: export PATH=\$PATH:/usr/local/bin")${NC}"
         fi
     else
         say "${RED}[ERROR] $(t "创建快捷指令失败，请手动执行: sudo ln -sf $script_abs_path $alias_path" "Failed to create shortcut. Manual: sudo ln -sf $script_abs_path $alias_path")${NC}"
@@ -1287,8 +1296,8 @@ show_menu() {
     esac
 }
 
-if [ -n "$1" ]; then
-    case "$1" in
+if [ -n "${1:-}" ]; then
+    case "${1:-}" in
         install|update) install_or_update_service ;;
         stop) stop_service ;;
         remove) remove_service ;;
