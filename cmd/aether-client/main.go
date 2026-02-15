@@ -77,7 +77,7 @@ type clientOptions struct {
 
 func main() {
 	var opts clientOptions
-	flag.StringVar(&opts.serverURL, "url", "https://example.com/v1/api/sync", "WebTransport endpoint URL")
+	flag.StringVar(&opts.serverURL, "url", "https://example.com/aether", "WebTransport endpoint URL")
 	flag.StringVar(&opts.psk, "psk", "", "pre-shared key for metadata encryption")
 	flag.StringVar(&opts.listenAddr, "listen", "127.0.0.1:1080", "local SOCKS5 listen address")
 	flag.StringVar(&opts.dialAddr, "dial-addr", "", "override dial address for QUIC (e.g. 203.0.113.10:443)")

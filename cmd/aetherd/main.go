@@ -52,7 +52,9 @@ func main() {
 		listenAddr = flag.String("listen", "127.0.0.1:1080", "SOCKS5 listen address")
 		httpAddr   = flag.String("http", "", "HTTP proxy listen address (e.g. 127.0.0.1:1081)")
 		apiAddr    = flag.String("api", "127.0.0.1:9880", "HTTP API listen address")
-		url        = flag.String("url", "", "WebTransport endpoint URL")
+		addr       = flag.String("server-addr", "", "WebTransport server address (domain/IP)")
+		port       = flag.Int("server-port", 443, "WebTransport server port")
+		path       = flag.String("server-path", "/aether", "WebTransport server path")
 		psk        = flag.String("psk", "", "Pre-shared key")
 	)
 	flag.Parse()
@@ -99,7 +101,9 @@ func main() {
 	config := core.SessionConfig{
 		ListenAddr:    *listenAddr,
 		HttpProxyAddr: *httpAddr,
-		URL:           *url,
+		ServerAddr:    *addr,
+		ServerPort:    *port,
+		ServerPath:    *path,
 		PSK:           *psk,
 	}
 
@@ -109,8 +113,14 @@ func main() {
 			config = *loaded
 			
 			// Override with flags if explicitly provided
-			if *url != "" {
-				config.URL = *url
+			if *addr != "" {
+				config.ServerAddr = *addr
+			}
+			if *port != 443 {
+				config.ServerPort = *port
+			}
+			if *path != "/aether" && *path != "" {
+				config.ServerPath = *path
 			}
 			if *psk != "" {
 				config.PSK = *psk
@@ -132,20 +142,21 @@ func main() {
 		log.Printf("Warning: HTTP proxy address not set, defaulting to %s", config.HttpProxyAddr)
 	}
 
-	// Start Core with config
-	if err := c.Start(config); err != nil {
-		log.Printf("Warning: Initial core start failed: %v", err)
-		log.Printf("The API server will still start, allowing you to reconfigure via GUI.")
-	}
-
 	// Start HTTP API server
 	server := api.NewServer(c, *apiAddr)
 	if err := server.Start(); err != nil {
 		log.Printf("Failed to start API server: %v", err)
 		return
 	}
-
 	log.Printf("HTTP API listening on %s", server.Addr())
+
+	// Start Core with config in background or blocking?
+	// The original logic was blocking, let's keep it blocking but after API starts
+	if err := c.Start(config); err != nil {
+		log.Printf("Warning: Initial core start failed: %v", err)
+		log.Printf("You can still reconfigure via GUI as the API server is running.")
+	}
+
 
 	// Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)

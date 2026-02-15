@@ -12,6 +12,7 @@ import {
   Button,
   Alert,
   Divider,
+  Grid,
 } from '@mui/material';
 import { Save as SaveIcon } from '@mui/icons-material';
 import { useCoreStore } from '@/store/coreStore';
@@ -203,13 +204,33 @@ export default function Rules() {
 
           {activeTab === 2 && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <TextField
-                label={t.rules.label_server_url}
-                value={editingConfig.url}
-                onChange={(e) => updateEditingConfig({ url: e.target.value })}
-                fullWidth
-              />
-
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    label="Server Address"
+                    value={editingConfig.server_addr}
+                    onChange={(e) => updateEditingConfig({ server_addr: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={6} md={2}>
+                  <TextField
+                    label="Port"
+                    type="number"
+                    value={editingConfig.server_port}
+                    onChange={(e) => updateEditingConfig({ server_port: parseInt(e.target.value) || 443 })}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={6} md={4}>
+                  <TextField
+                    label="Path"
+                    value={editingConfig.server_path}
+                    onChange={(e) => updateEditingConfig({ server_path: e.target.value })}
+                    fullWidth
+                  />
+                </Grid>
+              </Grid>
               <TextField
                 label={t.rules.label_psk}
                 type="password"

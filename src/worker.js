@@ -5,7 +5,7 @@ const RECORD_HEADER_LENGTH = 24;
 const TYPE_METADATA = 0x01;
 const TYPE_DATA = 0x02;
 const TYPE_ERROR = 0x7f;
-const DEFAULT_SECRET_PATH = "/v1/api/sync";
+const DEFAULT_SECRET_PATH = "/aether";
 const DEFAULT_LANDING_HTML = `<!doctype html>
 <html lang="en">
   <head>

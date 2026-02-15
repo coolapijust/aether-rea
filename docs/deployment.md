@@ -9,7 +9,7 @@
 - 同端口双栈：
   - UDP：HTTP/3 + WebTransport
   - TCP：TLS/HTTP1.1（`/health`、`/` decoy、Alt-Svc）
-- 默认协议入口路径：`/v1/api/sync`
+- 默认协议入口路径：`/aether`
 
 ## 2. 一键部署（推荐）
 

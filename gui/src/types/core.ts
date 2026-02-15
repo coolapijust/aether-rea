@@ -122,7 +122,9 @@ export interface StreamInfo {
 }
 
 export interface CoreConfig {
-  url: string;
+  server_addr: string;
+  server_port: number;
+  server_path: string;
   psk: string;
   listen_addr: string;
   http_proxy_addr: string;

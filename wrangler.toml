@@ -10,4 +10,4 @@ command = ""
 nodejs_compat = true
 
 [vars]
-SECRET_PATH = "/v1/api/sync"
+SECRET_PATH = "/aether"

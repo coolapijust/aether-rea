@@ -1,0 +1,38 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Node modules
+node_modules/
+
+# Tauri/Rust
+/gui/src-tauri/target/
+/gui/src-tauri/bin/
+/gui/src-tauri/gen/
+/gui/src-tauri/gen/artifacts/
+/gui/target/
+
+# Build artifacts
+dist/
+dist-native/
+bin/
+
+# Temporary files
+*.swp
+*.bak
+*~
+.idea/
+.vscode/
+
+# Aether specific binaries at root
+aether-gateway.exe
+aetherd.exe
+gui-sidecar.exe
+aether-client.exe
+
+# OS generated files
+.DS_Store
+Thumbs.db

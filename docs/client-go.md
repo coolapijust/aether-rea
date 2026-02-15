@@ -14,7 +14,7 @@ go build -o aether-client ./cmd/aether-client
 
 ```bash
 ./aether-client \
-  --url https://your-domain.com/v1/api/sync \
+  --url https://your-domain.com/aether \
   --psk "$PSK" \
   --listen 127.0.0.1:1080 \
   --rotate 20m \
@@ -31,7 +31,7 @@ go build -o aether-client ./cmd/aether-client
 
 ```bash
 ./aether-client \
-  --url https://your-domain.com/v1/api/sync \
+  --url https://your-domain.com/aether \
   --psk "$PSK" \
   --dial-addr 203.0.113.10:443
 ```
@@ -44,7 +44,7 @@ go build -o aether-client ./cmd/aether-client
 
 ```bash
 ./aether-client \
-  --url https://your-domain.com/v1/api/sync \
+  --url https://your-domain.com/aether \
   --psk "$PSK" \
   --auto-ip
 ```

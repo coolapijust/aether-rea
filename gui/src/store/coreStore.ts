@@ -84,7 +84,9 @@ interface CoreStore {
 }
 
 const defaultConfig: CoreConfig = {
-  url: '',
+  server_addr: 'dev.softx.eu.org',
+  server_port: 443,
+  server_path: '/aether',
   psk: '',
   listen_addr: '127.0.0.1:1080',
   http_proxy_addr: '127.0.0.1:1081',

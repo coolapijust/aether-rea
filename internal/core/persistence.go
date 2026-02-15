@@ -12,6 +12,9 @@ const ConfigFileName = "config.json"
 // DefaultConfig returns the recommended default configuration.
 func DefaultConfig() *SessionConfig {
 	return &SessionConfig{
+		ServerAddr:    "dev.softx.eu.org",
+		ServerPort:    443,
+		ServerPath:    "/aether",
 		ListenAddr:    "127.0.0.1:1080",
 		HttpProxyAddr: "127.0.0.1:1081",
 		MaxPadding:    128,

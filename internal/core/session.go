@@ -8,7 +8,6 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -72,7 +71,7 @@ func (sm *sessionManager) updateConfig(config *SessionConfig) {
 
 // initialize sets up the dialer without connecting.
 func (sm *sessionManager) initialize() error {
-	if sm.config.URL == "" {
+	if sm.config.ServerAddr == "" {
 		return nil
 	}
 	if sm.config.RecordPayloadBytes > 0 {
@@ -80,15 +79,7 @@ func (sm *sessionManager) initialize() error {
 		log.Printf("[DEBUG] V5.1 Config: record payload bytes=%d", applied)
 	}
 
-	parsed, err := url.Parse(sm.config.URL)
-	if err != nil {
-		return fmt.Errorf("invalid url: %w", err)
-	}
-	if parsed.Scheme != "https" {
-		return fmt.Errorf("url must be https")
-	}
-
-	// V5.2: Profile defaults + optional explicit QUIC window overrides.
+	// Profile defaults + optional explicit QUIC window overrides.
 	windowCfg, err := ResolveQUICWindowConfig(sm.config.WindowProfile)
 	if err != nil {
 		return fmt.Errorf("invalid QUIC window config: %w", err)
@@ -153,7 +144,7 @@ func (sm *sessionManager) initialize() error {
 
 	sm.dialer = &webtransport.Dialer{
 		TLSClientConfig: &tls.Config{
-			ServerName:         parsed.Hostname(),
+			ServerName:         sm.config.ServerAddr,
 			NextProtos:         []string{http3.NextProtoH3},
 			InsecureSkipVerify: sm.config.AllowInsecure,
 		},
@@ -171,7 +162,7 @@ func (sm *sessionManager) initialize() error {
 	if sm.config.AllowInsecure {
 		log.Printf("[WARNING] TLS InsecureSkipVerify is ENABLED. This is intended for debugging or private gateways ONLY.")
 	}
-	log.Printf("[DEBUG] WebTransport dialer initialized for %s", parsed.Hostname())
+	log.Printf("[DEBUG] WebTransport dialer initialized for %s", sm.config.ServerAddr)
 
 	return nil
 }
@@ -185,8 +176,8 @@ func (sm *sessionManager) connect() error {
 
 // connectLocked establishes session while holding the lock.
 func (sm *sessionManager) connectLocked() error {
-	// If no URL configured, stay idle
-	if sm.config.URL == "" {
+	// If no ServerAddr configured, stay idle
+	if sm.config.ServerAddr == "" {
 		return nil
 	}
 
@@ -304,46 +295,19 @@ func (sm *sessionManager) dialSession(ctx context.Context) (*webtransport.Sessio
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Parse and normalize base URL
-	u, err := url.Parse(sm.config.URL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid config url: %w", err)
+	// Construct URL directly from split fields
+	path := sm.config.ServerPath
+	if path == "" {
+		path = "/"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
 
-	// Ensure port is present in the URL host (required by quic-go/webtransport)
-	if u.Port() == "" {
-		// Robustness: Check if port was accidentally appended to the path
-		// e.g., https://example.com/v1/api/sync:8080
-		if lastColon := strings.LastIndex(u.Path, ":"); lastColon != -1 {
-			possiblePort := u.Path[lastColon+1:]
-			// Check if it's a numeric port
-			isPort := true
-			for _, c := range possiblePort {
-				if c < '0' || c > '9' {
-					isPort = false
-					break
-				}
-			}
-			if isPort && possiblePort != "" {
-				newPort := possiblePort
-				u.Path = u.Path[:lastColon]
-				u.Host = net.JoinHostPort(u.Hostname(), newPort)
-				log.Printf("[WARNING] Misplaced port detected in URL path. Auto-corrected to %s (Path: %s)", u.Host, u.Path)
-			}
-		}
-
-		// If still no port, use default
-		if u.Port() == "" {
-			defaultPort := "443"
-			if u.Scheme == "http" {
-				defaultPort = "80"
-			}
-			u.Host = net.JoinHostPort(u.Hostname(), defaultPort)
-		}
-	}
+	fullURL := fmt.Sprintf("https://%s:%d%s", sm.config.ServerAddr, sm.config.ServerPort, path)
 
 	// Handle DialAddr override (e.g. for IP optimization)
-	finalAddr := u.Host
+	finalAddr := net.JoinHostPort(sm.config.ServerAddr, fmt.Sprintf("%d", sm.config.ServerPort))
 	if sm.config.DialAddr != "" {
 		host, port, err := net.SplitHostPort(sm.config.DialAddr)
 		if err != nil {
@@ -355,15 +319,14 @@ func (sm *sessionManager) dialSession(ctx context.Context) (*webtransport.Sessio
 				return nil, fmt.Errorf("invalid dial addr: %w", err)
 			}
 		}
-		u.Host = net.JoinHostPort(host, port)
-		finalAddr = u.Host
+		finalAddr = net.JoinHostPort(host, port)
 	}
 
-	log.Printf("[DEBUG] Dialing WebTransport: %s (Target Host: %s)", u.String(), finalAddr)
-	_, sess, err := sm.dialer.Dial(ctx, u.String(), nil)
+	log.Printf("[DEBUG] Dialing WebTransport: %s (Target Host: %s)", fullURL, finalAddr)
+	_, sess, err := sm.dialer.Dial(ctx, fullURL, nil)
 	if err != nil {
 		log.Printf("[DEBUG] Dial failed: %v", err)
-		return nil, fmt.Errorf("dial to %s failed: %w", u.Host, err)
+		return nil, fmt.Errorf("dial to %s failed: %w", finalAddr, err)
 	}
 
 	return sess, nil

@@ -16,7 +16,9 @@ import (
 
 // SessionConfig is JSON-serializable configuration for Core.
 type SessionConfig struct {
-	URL            string         `json:"url"`                // https://host/path
+	ServerAddr     string         `json:"server_addr"`        // Domain or IP
+	ServerPort     int            `json:"server_port"`        // Port (1-65535)
+	ServerPath     string         `json:"server_path"`        // e.g. /aether
 	PSK            string         `json:"psk"`                // Pre-shared key
 	ListenAddr     string         `json:"listen_addr"`         // SOCKS5 listen address
 	HttpProxyAddr  string         `json:"http_proxy_addr"`      // HTTP proxy listen address
@@ -354,12 +356,15 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 			}
 		}
 
-		// Auto-start if we have a valid config now
-		if err := c.Start(config); err != nil {
-			// Return error so frontend knows it failed
-			return fmt.Errorf("auto-start failed: %w", err)
+		// If core is not Active (Idle/Starting/Error), we auto-start it
+		if state := c.GetState(); state == "Idle" || state == "Error" || state == "Starting" {
+			if err := c.Start(config); err != nil {
+				log.Printf("[WARNING] Core auto-start failed after config update: %v", err)
+				// We return success anyway because the config WAS saved.
+				// The UI can check the core state for the error.
+				return nil 
+			}
 		}
-		return nil
 	} else if currentState == StateActive {
 		if addressChanged {
 			log.Printf("[INFO] Proxy addresses changed, restarting core...")
@@ -586,13 +591,24 @@ func (c *Core) initialize() error {
 	}
 
 	// Connect to upstream (if configured)
-	if c.config.URL != "" {
-		log.Printf("[DEBUG] Connecting to upstream: %s", c.config.URL)
-		for idx, sm := range c.sessionPool {
+	if c.config.ServerAddr != "" {
+		log.Printf("[DEBUG] Connecting to upstream: %s:%d%s", c.config.ServerAddr, c.config.ServerPort, c.config.ServerPath)
+		
+		// Create a local copy of the pool to iterate without holding the global lock
+		pool := make([]*sessionManager, len(c.sessionPool))
+		copy(pool, c.sessionPool)
+		
+		// Release lock for network operations
+		c.mu.Unlock()
+		
+		for idx, sm := range pool {
 			if err := sm.connect(); err != nil {
+				c.mu.Lock() // Re-lock before returning error
 				return fmt.Errorf("session pool connect failed on index %d: %w", idx, err)
 			}
 		}
+		
+		c.mu.Lock() // Re-lock for the rest of initialize
 	}
 
 	log.Printf("[DEBUG] initialize finished")

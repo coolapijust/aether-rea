@@ -17,8 +17,23 @@ import { useCoreStore } from '@/store/coreStore';
 import { translations } from '@/lib/i18n';
 
 export default function Settings() {
-  const { language } = useCoreStore();
+  const {
+    language,
+    setLanguage,
+    editingConfig,
+    updateEditingConfig,
+    applyConfig,
+    hasUnsavedChanges
+  } = useCoreStore();
   const t = translations[language];
+
+  const handleSave = async () => {
+    try {
+      await applyConfig();
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   return (
     <Box sx={{ p: 3 }}>
@@ -34,21 +49,21 @@ export default function Settings() {
 
           <TextField
             label={t.settings.label_api_addr}
-            defaultValue="http://localhost:9880"
+            value="http://localhost:9880"
+            disabled
             fullWidth
             sx={{ mb: 2 }}
+            helperText="Custom API address support coming soon"
           />
 
           <FormControlLabel
-            control={<Switch defaultChecked />}
+            control={
+              <Switch
+                checked={editingConfig.rotation.enabled}
+                onChange={(e) => updateEditingConfig({ rotation: { ...editingConfig.rotation, enabled: e.target.checked } })}
+              />
+            }
             label={t.settings.label_auto_reconnect}
-          />
-
-          <TextField
-            label={t.settings.label_reconnect_interval}
-            type="number"
-            defaultValue={5}
-            sx={{ ml: 2, width: 120 }}
           />
 
           <Divider sx={{ my: 3 }} />
@@ -59,22 +74,28 @@ export default function Settings() {
 
           <FormControl fullWidth sx={{ mb: 2 }}>
             <InputLabel>{t.settings.label_theme}</InputLabel>
-            <Select defaultValue="system" label={t.settings.label_theme}>
+            <Select
+              value="system"
+              label={t.settings.label_theme}
+              disabled
+            >
               <MenuItem value="light">{t.settings.theme_light}</MenuItem>
               <MenuItem value="dark">{t.settings.theme_dark}</MenuItem>
               <MenuItem value="system">{t.settings.theme_system}</MenuItem>
             </Select>
           </FormControl>
 
-          <FormControlLabel
-            control={<Switch defaultChecked />}
-            label={t.settings.label_auto_connect}
-          />
-
-          <FormControlLabel
-            control={<Switch defaultChecked />}
-            label={t.settings.label_minimize}
-          />
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Language / 语言</InputLabel>
+            <Select
+              value={language}
+              label="Language / 语言"
+              onChange={(e) => setLanguage(e.target.value as any)}
+            >
+              <MenuItem value="en">English</MenuItem>
+              <MenuItem value="zh">简体中文</MenuItem>
+            </Select>
+          </FormControl>
 
           <Divider sx={{ my: 3 }} />
 
@@ -83,20 +104,19 @@ export default function Settings() {
           </Typography>
 
           <Typography variant="body2" color="text.secondary">
-            Aether-Realist GUI v0.1.0
+            Aether-Realist GUI v0.1.1 (Optimized)
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Protocol: Aether-Realist v5.1
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Core: aetherd v0.1.0
-          </Typography>
 
-          <Box sx={{ mt: 3 }}>
-            <Button variant="outlined" color="error">
-              {t.settings.btn_reset}
-            </Button>
-          </Box>
+          {hasUnsavedChanges && (
+            <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
+              <Button variant="contained" onClick={handleSave}>
+                {t.rules.btn_save}
+              </Button>
+            </Box>
+          )}
         </CardContent>
       </Card>
     </Box>

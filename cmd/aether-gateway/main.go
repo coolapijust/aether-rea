@@ -61,7 +61,7 @@ var (
 	certFile   = flag.String("cert", "cert.pem", "TLS certificate file")
 	keyFile    = flag.String("key", "key.pem", "TLS key file")
 	psk        = flag.String("psk", "", "Pre-shared key")
-	secretPath = flag.String("path", "/v1/api/sync", "Secret path for WebTransport")
+	secretPath = flag.String("path", "/aether", "Secret path for WebTransport")
 	decoyRoot  = flag.String("decoy", "", "Path to the decoy/masquerade static website root")
 )
 
@@ -78,10 +78,6 @@ type gatewayPerfStats struct {
 	tcpToWTReadWaitNanos atomic.Uint64
 	tcpToWTBuildCalls atomic.Uint64
 	tcpToWTBuildNanos atomic.Uint64
-	tcpToWTFlushCalls atomic.Uint64
-	tcpToWTFlushBytes atomic.Uint64
-	tcpToWTChunkCapBytes atomic.Uint64
-	tcpToWTCoalesceWaitMicros atomic.Uint64
 }
 
 var gwPerf gatewayPerfStats
@@ -114,23 +110,6 @@ func (s *gatewayPerfStats) observeTCPBuild(d time.Duration) {
 	s.tcpToWTBuildNanos.Add(uint64(d.Nanoseconds()))
 }
 
-func (s *gatewayPerfStats) observeTCPFlush(bytes int) {
-	if bytes <= 0 {
-		return
-	}
-	s.tcpToWTFlushCalls.Add(1)
-	s.tcpToWTFlushBytes.Add(uint64(bytes))
-}
-
-func (s *gatewayPerfStats) observeTCPAdaptive(chunkCap int, coalesceWait time.Duration) {
-	if chunkCap > 0 {
-		s.tcpToWTChunkCapBytes.Add(uint64(chunkCap))
-	}
-	if coalesceWait > 0 {
-		s.tcpToWTCoalesceWaitMicros.Add(uint64(coalesceWait.Microseconds()))
-	}
-}
-
 func startGatewayPerfReporter() {
 	if os.Getenv("PERF_DIAG_ENABLE") != "1" {
 		return
@@ -152,8 +131,6 @@ func startGatewayPerfReporter() {
 		var prevTCPToWTBytes, prevTCPToWTWrites, prevTCPToWTNanos uint64
 		var prevTCPReadWaitCalls, prevTCPReadWaitNanos uint64
 		var prevTCPBuildCalls, prevTCPBuildNanos uint64
-		var prevTCPFlushCalls, prevTCPFlushBytes uint64
-		var prevTCPChunkCapBytes, prevTCPCoalesceWaitMicros uint64
 
 		for range ticker.C {
 			curWTToTCPBytes := gwPerf.wtToTCPBytes.Load()
@@ -166,10 +143,6 @@ func startGatewayPerfReporter() {
 			curTCPReadWaitNanos := gwPerf.tcpToWTReadWaitNanos.Load()
 			curTCPBuildCalls := gwPerf.tcpToWTBuildCalls.Load()
 			curTCPBuildNanos := gwPerf.tcpToWTBuildNanos.Load()
-			curTCPFlushCalls := gwPerf.tcpToWTFlushCalls.Load()
-			curTCPFlushBytes := gwPerf.tcpToWTFlushBytes.Load()
-			curTCPChunkCapBytes := gwPerf.tcpToWTChunkCapBytes.Load()
-			curTCPCoalesceWaitMicros := gwPerf.tcpToWTCoalesceWaitMicros.Load()
 
 			dWTToTCPBytes := curWTToTCPBytes - prevWTToTCPBytes
 			dWTToTCPWrites := curWTToTCPWrites - prevWTToTCPWrites
@@ -181,17 +154,11 @@ func startGatewayPerfReporter() {
 			dTCPReadWaitNanos := curTCPReadWaitNanos - prevTCPReadWaitNanos
 			dTCPBuildCalls := curTCPBuildCalls - prevTCPBuildCalls
 			dTCPBuildNanos := curTCPBuildNanos - prevTCPBuildNanos
-			dTCPFlushCalls := curTCPFlushCalls - prevTCPFlushCalls
-			dTCPFlushBytes := curTCPFlushBytes - prevTCPFlushBytes
-			dTCPChunkCapBytes := curTCPChunkCapBytes - prevTCPChunkCapBytes
-			dTCPCoalesceWaitMicros := curTCPCoalesceWaitMicros - prevTCPCoalesceWaitMicros
 
 			prevWTToTCPBytes, prevWTToTCPWrites, prevWTToTCPNanos = curWTToTCPBytes, curWTToTCPWrites, curWTToTCPNanos
 			prevTCPToWTBytes, prevTCPToWTWrites, prevTCPToWTNanos = curTCPToWTBytes, curTCPToWTWrites, curTCPToWTNanos
 			prevTCPReadWaitCalls, prevTCPReadWaitNanos = curTCPReadWaitCalls, curTCPReadWaitNanos
 			prevTCPBuildCalls, prevTCPBuildNanos = curTCPBuildCalls, curTCPBuildNanos
-			prevTCPFlushCalls, prevTCPFlushBytes = curTCPFlushCalls, curTCPFlushBytes
-			prevTCPChunkCapBytes, prevTCPCoalesceWaitMicros = curTCPChunkCapBytes, curTCPCoalesceWaitMicros
 
 			sec := interval.Seconds()
 			ulMbps := float64(dWTToTCPBytes*8) / 1_000_000.0 / sec
@@ -206,11 +173,6 @@ func startGatewayPerfReporter() {
 				dlWriteUs = (float64(dTCPToWTNanos) / float64(dTCPToWTWrites)) / 1000.0
 			}
 
-			log.Printf(
-				"[PERF-GW] window=%s dl{mbps=%.2f writes=%d write_us=%.1f} ul{mbps=%.2f writes=%d write_us=%.1f}",
-				interval, dlMbps, dTCPToWTWrites, dlWriteUs, ulMbps, dWTToTCPWrites, ulWriteUs,
-			)
-
 			readWaitUs := 0.0
 			if dTCPReadWaitCalls > 0 {
 				readWaitUs = (float64(dTCPReadWaitNanos) / float64(dTCPReadWaitCalls)) / 1000.0
@@ -219,24 +181,18 @@ func startGatewayPerfReporter() {
 			if dTCPBuildCalls > 0 {
 				buildUs = (float64(dTCPBuildNanos) / float64(dTCPBuildCalls)) / 1000.0
 			}
-			flushAvgBytes := 0.0
-			if dTCPFlushCalls > 0 {
-				flushAvgBytes = float64(dTCPFlushBytes) / float64(dTCPFlushCalls)
-			}
-			chunkCapAvgBytes := 0.0
-			coalesceWaitAvgUs := 0.0
-			if dTCPFlushCalls > 0 {
-				chunkCapAvgBytes = float64(dTCPChunkCapBytes) / float64(dTCPFlushCalls)
-				coalesceWaitAvgUs = float64(dTCPCoalesceWaitMicros) / float64(dTCPFlushCalls)
-			}
+
 			log.Printf(
-				"[PERF-GW2] window=%s dl_stage{read_wait_us=%.1f reads=%d build_us=%.1f builds=%d write_block_us=%.1f writes=%d flush_avg_bytes=%.1f flushes=%d chunk_cap_avg_bytes=%.1f coalesce_wait_avg_us=%.1f}",
+				"[PERF-GW] window=%s dl{mbps=%.2f writes=%d write_us=%.1f} ul{mbps=%.2f writes=%d write_us=%.1f}",
+				interval, dlMbps, dTCPToWTWrites, dlWriteUs, ulMbps, dWTToTCPWrites, ulWriteUs,
+			)
+
+			log.Printf(
+				"[PERF-GW2] window=%s dl_stage{read_wait_us=%.1f reads=%d build_us=%.1f builds=%d write_block_us=%.1f writes=%d}",
 				interval,
 				readWaitUs, dTCPReadWaitCalls,
 				buildUs, dTCPBuildCalls,
 				dlWriteUs, dTCPToWTWrites,
-				flushAvgBytes, dTCPFlushCalls,
-				chunkCapAvgBytes, coalesceWaitAvgUs,
 			)
 		}
 	}()
@@ -501,7 +457,7 @@ func main() {
 			}
 			w.Header().Set("Alt-Svc", fmt.Sprintf(`h3=":%s"; ma=2592000`, port))
 
-			// Delegate to default mux (handles /health, /, /v1/api/sync)
+			// Delegate to default mux (handles /health, /, /aether)
 			http.DefaultServeMux.ServeHTTP(w, r)
 		}),
 	}
@@ -642,24 +598,14 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 
 	// TCP -> WebTransport
 	go func() {
-		type tcpToWTChunk struct {
-			data []byte
-			err  error
-		}
-		readBuf := make([]byte, 512*1024)
-		queueSize := 256
-		if v := os.Getenv("TCP_TO_WT_QUEUE_SIZE"); v != "" {
-			if parsed, pErr := strconv.Atoi(v); pErr == nil && parsed >= 16 && parsed <= 4096 {
-				queueSize = parsed
-			}
-		}
-		chunkCh := make(chan tcpToWTChunk, queueSize)
+		chunkCh := make(chan []byte, 1024)
 		stageCtx, stageCancel := context.WithCancel(context.Background())
 		defer stageCancel()
 
-		// Stage A: read from TCP continuously and enqueue chunks.
+		// Stage A: Continuous read from TCP to keep window open
 		go func() {
 			defer close(chunkCh)
+			readBuf := make([]byte, 32*1024)
 			for {
 				readStart := time.Now()
 				n, err := conn.Read(readBuf)
@@ -669,285 +615,55 @@ func handleStream(stream *webtransport.Stream, psk string, streamID uint64, ng *
 					chunk := make([]byte, n)
 					copy(chunk, readBuf[:n])
 					select {
-					case chunkCh <- tcpToWTChunk{data: chunk}:
+					case chunkCh <- chunk:
 					case <-stageCtx.Done():
 						return
 					}
 				}
-
 				if err != nil {
-					select {
-					case chunkCh <- tcpToWTChunk{err: err}:
-					case <-stageCtx.Done():
+					if err != io.EOF && !strings.Contains(err.Error(), "closed network connection") {
+						errCh <- err
+					} else {
+						errCh <- nil
 					}
 					return
 				}
 			}
 		}()
 
+		// Stage B: Greedy forwarding to WebTransport
 		maxPayload := core.GetMaxRecordPayload()
-		adaptiveEnabled := true
-		if v := os.Getenv("TCP_TO_WT_ADAPTIVE"); v != "" {
-			adaptiveEnabled = v == "1" || strings.EqualFold(v, "true")
-		}
-		parseIntEnv := func(name string, fallback, min, max int) int {
-			v := os.Getenv(name)
-			if v == "" {
-				return fallback
-			}
-			parsed, err := strconv.Atoi(v)
-			if err != nil {
-				return fallback
-			}
-			if parsed < min {
-				return min
-			}
-			if parsed > max {
-				return max
-			}
-			return parsed
-		}
-		parseDurMs := func(name string, fallback, min, max time.Duration) time.Duration {
-			v := os.Getenv(name)
-			if v == "" {
-				return fallback
-			}
-			parsed, err := strconv.Atoi(v)
-			if err != nil {
-				return fallback
-			}
-			d := time.Duration(parsed) * time.Millisecond
-			if d < min {
-				return min
-			}
-			if d > max {
-				return max
-			}
-			return d
-		}
-		const (
-			defaultTargetWriteUs = 20000.0
-		)
-		minChunkCap := parseIntEnv("TCP_TO_WT_SCHED_MIN_CHUNK", 16384, 8192, maxPayload)
-		maxChunkCap := parseIntEnv("TCP_TO_WT_SCHED_MAX_CHUNK", maxPayload, minChunkCap, maxPayload)
-		baseCoalesceWait := parseDurMs("TCP_TO_WT_COALESCE_MS", 3*time.Millisecond, 0, 200*time.Millisecond)
-		targetWriteUs := defaultTargetWriteUs
-		if v := os.Getenv("TCP_TO_WT_SCHED_TARGET_WRITE_US"); v != "" {
-			if parsed, err := strconv.Atoi(v); err == nil {
-				if parsed < 3000 {
-					parsed = 3000
-				}
-				if parsed > 200000 {
-					parsed = 200000
-				}
-				targetWriteUs = float64(parsed)
-			}
-		}
-		flushThreshold := parseIntEnv("TCP_TO_WT_FLUSH_THRESHOLD", maxChunkCap, minChunkCap, core.MaxRecordSize-core.RecordHeaderLength)
-		if flushThreshold > maxChunkCap {
-			flushThreshold = maxChunkCap
-		}
-		type schedState string
-		const (
-			schedNormal    schedState = "normal"
-			schedRecovery  schedState = "recovery"
-			schedCongested schedState = "congested"
-		)
-		type sendScheduler struct {
-			state        schedState
-			targetWrite  float64
-			ewmaWriteUs  float64
-			chunkCap     int
-			flushTarget  int
-			coalesceWait time.Duration
-		}
-		sched := &sendScheduler{
-			state:        schedNormal,
-			targetWrite:  targetWriteUs,
-			chunkCap:     flushThreshold,
-			flushTarget:  flushThreshold,
-			coalesceWait: baseCoalesceWait,
-		}
-		if !adaptiveEnabled {
-			sched.chunkCap = flushThreshold
-			sched.flushTarget = flushThreshold
-			sched.coalesceWait = baseCoalesceWait
-		}
-		clampChunk := func(v int) int {
-			if v < minChunkCap {
-				return minChunkCap
-			}
-			if v > maxChunkCap {
-				return maxChunkCap
-			}
-			return v
-		}
-		adjustScheduler := func(writeDur time.Duration, chunkSize int) {
-			writeUs := float64(writeDur.Nanoseconds()) / 1000.0
-			if sched.ewmaWriteUs == 0 {
-				sched.ewmaWriteUs = writeUs
-			} else {
-				const alpha = 0.20
-				sched.ewmaWriteUs = sched.ewmaWriteUs*(1-alpha) + writeUs*alpha
-			}
-			if !adaptiveEnabled {
-				return
-			}
-
-			switch {
-			case sched.ewmaWriteUs > sched.targetWrite*2.0:
-				sched.state = schedCongested
-				sched.chunkCap = clampChunk(sched.chunkCap - 2048)
-				sched.flushTarget = sched.chunkCap
-				sched.coalesceWait = 2 * time.Millisecond
-			case sched.ewmaWriteUs > sched.targetWrite*1.2:
-				sched.state = schedRecovery
-				sched.chunkCap = clampChunk(sched.chunkCap - 1024)
-				sched.flushTarget = sched.chunkCap
-				if sched.coalesceWait > 2*time.Millisecond {
-					sched.coalesceWait -= 1 * time.Millisecond
-				}
-			case sched.ewmaWriteUs < sched.targetWrite*0.7:
-				sched.state = schedNormal
-				if chunkSize >= sched.chunkCap/2 {
-					sched.chunkCap = clampChunk(sched.chunkCap + 512)
-				}
-				sched.flushTarget = sched.chunkCap
-				if sched.coalesceWait < baseCoalesceWait+2*time.Millisecond {
-					sched.coalesceWait += 1 * time.Millisecond
-				}
-			default:
-				// keep current state and tune
-			}
-			if sched.coalesceWait < 2*time.Millisecond {
-				sched.coalesceWait = 2 * time.Millisecond
-			}
-			if sched.coalesceWait > 20*time.Millisecond {
-				sched.coalesceWait = 20 * time.Millisecond
-			}
-		}
-		pending := make([]byte, 0, maxPayload*2)
-		flushTimer := time.NewTimer(time.Hour)
-		if !flushTimer.Stop() {
-			select {
-			case <-flushTimer.C:
-			default:
-			}
-		}
-		timerArmed := false
-		var readErr error
-
-		flushPending := func() error {
-			for len(pending) > 0 {
-				chunkSize := len(pending)
-				// Always use maxPayload (16KB) as the per-record limit.
-				// The adaptive scheduler controls WHEN to flush, not HOW BIG each record is.
-				chunkCap := maxPayload
-				if chunkSize > chunkCap {
-					chunkSize = chunkCap
-				}
-				chunk := pending[:chunkSize]
-				gwPerf.observeTCPFlush(chunkSize)
-				gwPerf.observeTCPAdaptive(chunkCap, sched.coalesceWait)
-				buildStart := time.Now()
-				recordBytes, buildErr := core.BuildDataRecord(chunk, meta.Options.MaxPadding, ng)
-				if buildErr != nil {
-					return buildErr
-				}
-				gwPerf.observeTCPBuild(time.Since(buildStart))
-				writeStart := time.Now()
-				if _, wErr := stream.Write(recordBytes); wErr != nil {
-					core.PutBuffer(recordBytes)
-					return wErr
-				}
-				writeDur := time.Since(writeStart)
-				gwPerf.observeTCPToWT(len(recordBytes), writeDur)
-				adjustScheduler(writeDur, chunkSize)
-				core.PutBuffer(recordBytes)
-				pending = pending[chunkSize:]
-			}
-			pending = pending[:0]
-			return nil
-		}
-
-		resetFlushTimer := func() {
-			if timerArmed {
-				if !flushTimer.Stop() {
-					select {
-					case <-flushTimer.C:
-					default:
-					}
-				}
-			}
-			flushTimer.Reset(sched.coalesceWait)
-			timerArmed = true
-		}
-
-		stopFlushTimer := func() {
-			if !timerArmed {
-				return
-			}
-			if !flushTimer.Stop() {
-				select {
-				case <-flushTimer.C:
-				default:
-				}
-			}
-			timerArmed = false
-		}
-
 		for {
-			if len(pending) > 0 && !timerArmed {
-				resetFlushTimer()
-			}
 			select {
-			case item, ok := <-chunkCh:
+			case data, ok := <-chunkCh:
 				if !ok {
-					stopFlushTimer()
-					if len(pending) > 0 {
-						if fErr := flushPending(); fErr != nil {
-							errCh <- fErr
-							return
-						}
-					}
-					if readErr != nil && readErr != io.EOF {
-						// Ignore "use of closed network connection" if caused by other side closing
-						if !strings.Contains(readErr.Error(), "closed network connection") {
-							errCh <- readErr
-						} else {
-							errCh <- nil
-						}
-					} else {
-						errCh <- nil
-					}
 					return
 				}
-
-				if item.err != nil {
-					readErr = item.err
-					continue
-				}
-				if len(item.data) == 0 {
-					continue
-				}
-
-				pending = append(pending, item.data...)
-				if len(pending) >= sched.flushTarget {
-					stopFlushTimer()
-					if fErr := flushPending(); fErr != nil {
-						errCh <- fErr
+				remaining := data
+				for len(remaining) > 0 {
+					chunkSize := len(remaining)
+					if chunkSize > maxPayload {
+						chunkSize = maxPayload
+					}
+					
+					buildStart := time.Now()
+					recordBytes, buildErr := core.BuildDataRecord(remaining[:chunkSize], 0, ng)
+					if buildErr != nil {
+						errCh <- buildErr
 						return
 					}
-				} else {
-					resetFlushTimer()
-				}
-			case <-flushTimer.C:
-				timerArmed = false
-				if len(pending) > 0 {
-					if fErr := flushPending(); fErr != nil {
-						errCh <- fErr
+					gwPerf.observeTCPBuild(time.Since(buildStart))
+					
+					writeStart := time.Now()
+					if _, wErr := stream.Write(recordBytes); wErr != nil {
+						core.PutBuffer(recordBytes)
+						errCh <- wErr
 						return
 					}
+					gwPerf.observeTCPToWT(len(recordBytes), time.Since(writeStart))
+					core.PutBuffer(recordBytes)
+					
+					remaining = remaining[chunkSize:]
 				}
 			case <-stageCtx.Done():
 				return
