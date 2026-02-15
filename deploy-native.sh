@@ -754,8 +754,8 @@ ensure_source() {
             git clone --depth 1 "$GITHUB_REPO" "$SRC_DIR"
         fi
         (cd "$SRC_DIR" && {
-            git checkout -f "$DEPLOY_REF" 2>/dev/null || git checkout -f "origin/$DEPLOY_REF"
-            git pull --ff-only 2>/dev/null || true
+            git fetch --all --prune
+            git reset --hard "origin/$DEPLOY_REF" 2>/dev/null || git reset --hard "$DEPLOY_REF"
         })
         return 0
     fi
@@ -1127,8 +1127,8 @@ show_status() {
     # Prefer status-code based checks; accept any 2xx/3xx.
     local hc_path code
     hc_path="${HEALTH_PATH:-/health}"
-    # Use 127.0.0.1 to avoid IPv6 issues with localhost
-    code="$(curl -ksS -o /dev/null -w "%{http_code}" "https://127.0.0.1:${port}${hc_path}" 2>/dev/null || echo 000)"
+    # Revert to localhost to support both IPv4/IPv6 (127.0.0.1 fails if listener is [::] only on some systems)
+    code="$(curl -ksS -o /dev/null -w "%{http_code}" "https://localhost:${port}${hc_path}" 2>/dev/null || echo 000)"
     if [[ "$code" =~ ^2|^3 ]]; then
         say "${GREEN}[OK] https://localhost:${port}${hc_path} (HTTP ${code})${NC}"
         return 0
@@ -1136,7 +1136,7 @@ show_status() {
 
     # Fallback: check decoy root (/) to distinguish "service down" vs "no /health route".
     local code_root
-    code_root="$(curl -ksS -o /dev/null -w "%{http_code}" "https://127.0.0.1:${port}/" 2>/dev/null || echo 000)"
+    code_root="$(curl -ksS -o /dev/null -w "%{http_code}" "https://localhost:${port}/" 2>/dev/null || echo 000)"
     if [[ "$code_root" =~ ^2|^3 ]]; then
         say "${YELLOW}[WARN] $(t "服务在线，但健康路径返回非 2xx/3xx。" "Service is up, but health path returned non-2xx/3xx.")${NC}"
         say "${YELLOW}$(t "health 状态码: " "health status: ")${code}${NC} ($(t "路径" "path"): ${hc_path})"
