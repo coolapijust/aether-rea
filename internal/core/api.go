@@ -314,19 +314,34 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 	
 	// Check if critical addresses changed
 	var oldListenAddr, oldHttpAddr string
+	var oldServerAddr, oldServerPath, oldPSK string
+	var oldServerPort int
 	if c.config != nil {
 		oldListenAddr = c.config.ListenAddr
 		oldHttpAddr = c.config.HttpProxyAddr
+		oldServerAddr = c.config.ServerAddr
+		oldServerPort = c.config.ServerPort
+		oldServerPath = c.config.ServerPath
+		oldPSK = c.config.PSK
 	}
 	
 	c.config = &config
 	
 	// Save to disk
-	if c.configManager != nil {
-		if err := c.configManager.Save(&config); err != nil {
-			log.Printf("[ERROR] Failed to save config: %v", err)
-			return fmt.Errorf("failed to save config: %w", err)
+	if c.configManager == nil {
+		// Best-effort: try to initialize on demand so GUI saves persist.
+		if cm, err := NewConfigManager(); err == nil {
+			c.configManager = cm
 		}
+	}
+	if c.configManager == nil {
+		c.mu.Unlock()
+		return fmt.Errorf("config persistence unavailable")
+	}
+	if err := c.configManager.Save(&config); err != nil {
+		log.Printf("[ERROR] Failed to save config: %v", err)
+		c.mu.Unlock()
+		return fmt.Errorf("failed to save config: %w", err)
 	}
 
 	// Update session manager config if it exists
@@ -340,21 +355,24 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 		c.sessionMgr.updateConfig(&config)
 	}
 
-	// Update rules from config if they exist
-	if len(config.Rules) > 0 {
-		c.UpdateRules(config.Rules)
-	}
-
 	// Check for critical address changes that require restart
 	// 1. Listen addresses (SOCKS/HTTP)
 	// 2. Server connection parameters (Addr/Port/Path/PSK) - effectively a new target
 	addressChanged := oldListenAddr != "" && (oldListenAddr != config.ListenAddr || oldHttpAddr != config.HttpProxyAddr)
-	if c.config.ServerAddr != config.ServerAddr || c.config.ServerPort != config.ServerPort || c.config.ServerPath != config.ServerPath || c.config.PSK != config.PSK {
+	if oldServerAddr != config.ServerAddr || oldServerPort != config.ServerPort || oldServerPath != config.ServerPath || oldPSK != config.PSK {
 		addressChanged = true
 	}
-	needsProxyRefresh := c.systemProxyEnabled && oldListenAddr != config.ListenAddr
+	needsProxyRefresh := c.systemProxyEnabled && oldHttpAddr != config.HttpProxyAddr
+	rules := config.Rules
 	c.mu.Unlock()
 	SetPerfDiagEnabled(config.PerfCaptureEnabled)
+
+	// Update rules after unlocking to avoid deadlocking on c.mu.
+	if len(rules) > 0 && c.ruleEngine != nil {
+		if err := c.UpdateRules(rules); err != nil {
+			return err
+		}
+	}
 	
 	if needsProxyRefresh {
 		c.SetSystemProxy(true)
