@@ -136,6 +136,13 @@ func New() *Core {
 	return c
 }
 
+// SetConfigManager sets the config manager for persistence.
+func (c *Core) SetConfigManager(cm *ConfigManager) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.configManager = cm
+}
+
 func (c *Core) processEvents() {
 	for {
 		select {
@@ -338,7 +345,13 @@ func (c *Core) UpdateConfig(config SessionConfig) error {
 		c.UpdateRules(config.Rules)
 	}
 
+	// Check for critical address changes that require restart
+	// 1. Listen addresses (SOCKS/HTTP)
+	// 2. Server connection parameters (Addr/Port/Path/PSK) - effectively a new target
 	addressChanged := oldListenAddr != "" && (oldListenAddr != config.ListenAddr || oldHttpAddr != config.HttpProxyAddr)
+	if c.config.ServerAddr != config.ServerAddr || c.config.ServerPort != config.ServerPort || c.config.ServerPath != config.ServerPath || c.config.PSK != config.PSK {
+		addressChanged = true
+	}
 	needsProxyRefresh := c.systemProxyEnabled && oldListenAddr != config.ListenAddr
 	c.mu.Unlock()
 	SetPerfDiagEnabled(config.PerfCaptureEnabled)
@@ -413,7 +426,26 @@ func (c *Core) UpdateRules(rules []*Rule) error {
 	if c.ruleEngine == nil {
 		return fmt.Errorf("rule engine not initialized")
 	}
-	return c.ruleEngine.UpdateRules(rules)
+	
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	if err := c.ruleEngine.UpdateRules(rules); err != nil {
+		return err
+	}
+	
+	// Sync to config and save
+	if c.config != nil {
+		c.config.Rules = rules
+		if c.configManager != nil {
+			if err := c.configManager.Save(c.config); err != nil {
+				log.Printf("[ERROR] Failed to save rules: %v", err)
+				// Don't fail the request, just log error
+			}
+		}
+	}
+	
+	return nil
 }
 
 // IsSystemProxyEnabled returns true if system proxy is active.

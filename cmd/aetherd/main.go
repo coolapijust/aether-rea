@@ -69,6 +69,9 @@ func main() {
 
 	// Create Core
 	c := core.New()
+	if cm != nil {
+		c.SetConfigManager(cm)
+	}
 
 	// Redirect logs to stdout, Core event stream, and optionally a file
 	// Apply global filters for noise reduction
