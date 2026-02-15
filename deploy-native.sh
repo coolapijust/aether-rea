@@ -1121,7 +1121,8 @@ show_status() {
     # Prefer status-code based checks; accept any 2xx/3xx.
     local hc_path code
     hc_path="${HEALTH_PATH:-/health}"
-    code="$(curl -ksS -o /dev/null -w "%{http_code}" "https://localhost:${port}${hc_path}" 2>/dev/null || echo 000)"
+    # Use 127.0.0.1 to avoid IPv6 issues with localhost
+    code="$(curl -ksS -o /dev/null -w "%{http_code}" "https://127.0.0.1:${port}${hc_path}" 2>/dev/null || echo 000)"
     if [[ "$code" =~ ^2|^3 ]]; then
         say "${GREEN}[OK] https://localhost:${port}${hc_path} (HTTP ${code})${NC}"
         return 0
@@ -1129,7 +1130,7 @@ show_status() {
 
     # Fallback: check decoy root (/) to distinguish "service down" vs "no /health route".
     local code_root
-    code_root="$(curl -ksS -o /dev/null -w "%{http_code}" "https://localhost:${port}/" 2>/dev/null || echo 000)"
+    code_root="$(curl -ksS -o /dev/null -w "%{http_code}" "https://127.0.0.1:${port}/" 2>/dev/null || echo 000)"
     if [[ "$code_root" =~ ^2|^3 ]]; then
         say "${YELLOW}[WARN] $(t "服务在线，但健康路径返回非 2xx/3xx。" "Service is up, but health path returned non-2xx/3xx.")${NC}"
         say "${YELLOW}$(t "health 状态码: " "health status: ")${code}${NC} ($(t "路径" "path"): ${hc_path})"
@@ -1144,6 +1145,7 @@ show_status() {
 }
 
 view_logs() {
+    say "${YELLOW}$(t "正在查看日志... (按 Ctrl+C 退出)" "Viewing logs... (Press Ctrl+C to exit)")${NC}"
     run_root journalctl -u "$SERVICE_NAME" -f --no-pager
 }
 
@@ -1287,7 +1289,7 @@ show_menu() {
     say "4. $(t "查看状态" "Show status")"
     say "5. $(t "查看日志" "View logs")"
     say "6. $(t "检查系统优化 (BBR)" "Check BBR")"
-    say "7. $(t "快捷修改关键配置" "Quick config")"
+    say "7. $(t "修改核心配置 (PSK/域名/端口)" "Configure (PSK/Domain/Port)")"
     say "0. $(t "退出" "Exit")"
     read_tty option "请输入选项 [0-7]: " ""
     case "$option" in
