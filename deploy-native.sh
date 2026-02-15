@@ -986,6 +986,11 @@ install_alias() {
     say "${YELLOW}$(t "正在配置系统快捷指令 (aether)..." "Configuring system shortcut (aether)...")${NC}"
     if run_root ln -sf "$script_abs_path" "$alias_path"; then
         say "${GREEN}[OK] $(t "快捷指令已创建。现在在任何地方输入 'aether' 即可打开管理菜单。" "Shortcut created. Type 'aether' anywhere to open the management menu.")${NC}"
+        
+        # Check if /usr/local/bin is in PATH
+        if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
+            say "${YELLOW}$(t "提示: /usr/local/bin 不在您的 PATH 中，您可能需要运行: export PATH=\$PATH:/usr/local/bin" "Hint: /usr/local/bin is not in your PATH. You may need to run: export PATH=\$PATH:/usr/local/bin")${NC}"
+        fi
     else
         say "${RED}[ERROR] $(t "创建快捷指令失败，请手动执行: sudo ln -sf $script_abs_path $alias_path" "Failed to create shortcut. Manual: sudo ln -sf $script_abs_path $alias_path")${NC}"
     fi
