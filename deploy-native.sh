@@ -969,39 +969,46 @@ EOF
 
 install_alias() {
     local alias_path="/usr/local/bin/aether"
-    local script_abs_path
-    script_abs_path="$(readlink -f "$0")"
+    local target_path=""
 
-    # If running from a temporary location (pipe or /tmp), switch to the persistent copy in SRC_DIR
-    if [[ "$script_abs_path" == /tmp/* ]] || [[ "$script_abs_path" == /dev/fd/* ]] || [[ "$script_abs_path" == /proc/* ]]; then
-        if [ -f "${SRC_DIR}/deploy-native.sh" ]; then
-            script_abs_path="${SRC_DIR}/deploy-native.sh"
-            chmod +x "$script_abs_path"
-        else
-            # Fallback: copy self to deploy dir if source is missing (rare)
-            mkdir -p "${AETHER_HOME}/deploy"
-            cp "$0" "${AETHER_HOME}/deploy/manage.sh"
-            script_abs_path="${AETHER_HOME}/deploy/manage.sh"
-            chmod +x "$script_abs_path"
+    # Strategy: Always prefer the persistent copy in SRC_DIR if it exists (which it should after install/update).
+    # This avoids issues with temporary one-liner scripts or user-specific paths.
+    if [ -f "${SRC_DIR}/deploy-native.sh" ]; then
+        target_path="${SRC_DIR}/deploy-native.sh"
+        chmod +x "$target_path"
+    else
+        # Fallback for some weird edge case where SRC_DIR isn't populated but we are installing?
+        # Use current script if it's a real file
+        local current_script
+        current_script="$(readlink -f "$0")"
+        if [ -f "$current_script" ]; then
+             target_path="$current_script"
         fi
     fi
 
-    # Detect if we are already linked correctly to avoid redundant sudo prompts
-    if [ -L "$alias_path" ] && [ "$(readlink -f "$alias_path")" == "$script_abs_path" ]; then
+    if [ -z "$target_path" ]; then
+        say "${YELLOW}$(t "警告: 无法定位持久化脚本路径，跳过创建快捷指令。" "Warning: Cannot locate persistent script path; skipping shortcut creation.")${NC}"
+        return 0
+    fi
+
+    # Detect if we are already linked correctly
+    if [ -L "$alias_path" ] && [ "$(readlink -f "$alias_path")" == "$target_path" ]; then
         return 0
     fi
 
     say ""
     say "${YELLOW}$(t "正在配置系统快捷指令 (aether)..." "Configuring system shortcut (aether)...")${NC}"
-    if run_root ln -sf "$script_abs_path" "$alias_path"; then
-        say "${GREEN}[OK] $(t "快捷指令已创建 [指向 $script_abs_path]。现在在任何地方输入 'aether' 即可打开管理菜单。" "Shortcut created [targets $script_abs_path]. Type 'aether' anywhere to open the management menu.")${NC}"
+    if run_root ln -sf "$target_path" "$alias_path"; then
+        say "${GREEN}[OK] $(t "快捷指令已创建 [指向 $target_path]。" "Shortcut created [target: $target_path].")${NC}"
+        say "${GREEN}$(t "现在您可以在任何地方输入 'aether' 来管理服务。" "You can now type 'aether' anywhere to manage the service.")${NC}"
         
         # Check if /usr/local/bin is in PATH
         if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
-            say "${YELLOW}$(t "提示: /usr/local/bin 不在您的 PATH 中，可能需要运行: export PATH=\$PATH:/usr/local/bin" "Hint: /usr/local/bin is not in your PATH. You may need to run: export PATH=\$PATH:/usr/local/bin")${NC}"
+            say "${YELLOW}$(t "提示: /usr/local/bin 不在您的 PATH 中，无法直接使用 'aether'。" "Hint: /usr/local/bin is missing from PATH.")${NC}"
+            say "${YELLOW}$(t "请运行: export PATH=\$PATH:/usr/local/bin" "Run: export PATH=\$PATH:/usr/local/bin")${NC}"
         fi
     else
-        say "${RED}[ERROR] $(t "创建快捷指令失败，请手动执行: sudo ln -sf $script_abs_path $alias_path" "Failed to create shortcut. Manual: sudo ln -sf $script_abs_path $alias_path")${NC}"
+        say "${RED}[ERROR] $(t "创建快捷指令失败。请手动运行: sudo ln -sf $target_path $alias_path" "Shortcut creation failed. Manual: sudo ln -sf $target_path $alias_path")${NC}"
     fi
 }
 
