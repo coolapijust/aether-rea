@@ -271,10 +271,30 @@ resolve_port_conflict() {
 
     if [ -n "$pid" ]; then
         say "${YELLOW}$(t "占用进程" "Process"): ${pname:-unknown} (PID: ${pid})${NC}"
+        
+        # Add warning about potential disconnection
+        say "${RED}$(t "警告: 如果您正通过该端口提供的服务(如VPN/代理)连接服务器，强制结束将导致连接中断且脚本终止！" "WARNING: If you are connected via this service (e.g. VPN/Proxy), killing it will drop your connection and abort the script!")${NC}"
+        
         local kill_confirm="n"
         read_tty_yn kill_confirm "$(t "是否强制结束该进程释放端口? [y/N]: " "Kill it to free the port? [y/N]: ")" "n"
         if [ "$kill_confirm" = "y" ]; then
-            run_root kill -9 "$pid" 2>/dev/null || true
+            say "${YELLOW}$(t "尝试停止进程..." "Attempting to stop process...")${NC}"
+            
+            # Try to stop via systemctl if it matches a service name
+            if systemctl list-units --full -all | grep -q "${pname}.service"; then
+                 run_root systemctl stop "${pname}.service" 2>/dev/null || true
+            fi
+            
+            # Gracious kill first
+            run_root kill -15 "$pid" 2>/dev/null || true
+            sleep 1
+            
+            # Force kill if still alive
+            if check_port "$port"; then
+                 run_root kill -9 "$pid" 2>/dev/null || true
+            fi
+            
+            say "${GREEN}$(t "端口已释放。" "Port released.")${NC}"
         fi
     else
         say "${YELLOW}$(t "无法定位占用进程，若启动失败请手动释放端口。" "Could not identify the process; free the port manually if start fails.")${NC}"
