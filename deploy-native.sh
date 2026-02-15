@@ -100,7 +100,7 @@ curl_fetch() {
     fi
 }
 
-SCRIPT_VERSION="2026-02-13-acme-install-fix2"
+SCRIPT_VERSION="2026-02-13-acme-install-fix3-force-link"
 log "script_version=${SCRIPT_VERSION}"
 
 # When this script is executed via `curl | bash`, stdin is a pipe so `read -p` sees EOF.
@@ -998,6 +998,12 @@ install_alias() {
 
     say ""
     say "${YELLOW}$(t "正在配置系统快捷指令 (aether)..." "Configuring system shortcut (aether)...")${NC}"
+
+    # Force remove existing link to ensure update
+    if [ -L "$alias_path" ] || [ -f "$alias_path" ]; then
+        run_root rm -f "$alias_path"
+    fi
+
     if run_root ln -sf "$target_path" "$alias_path"; then
         say "${GREEN}[OK] $(t "快捷指令已创建 [指向 $target_path]。" "Shortcut created [target: $target_path].")${NC}"
         say "${GREEN}$(t "现在您可以在任何地方输入 'aether' 来管理服务。" "You can now type 'aether' anywhere to manage the service.")${NC}"
@@ -1140,7 +1146,8 @@ show_status() {
         say "${RED}[WARN] $(t "健康检查失败 (服务可能未对本机可用)。" "Health check failed (service may not be reachable locally).")${NC}"
         say "${YELLOW}$(t "health 状态码: " "health status: ")${code}${NC} ($(t "路径" "path"): ${hc_path})"
         say "${YELLOW}$(t "根路径状态码: " "root status: ")${code_root}${NC} (/)"
-        say "$(t "查看日志: " "Check logs: ")sudo journalctl -u ${SERVICE_NAME} -n 200 --no-pager"
+        say "$(t "正在自动分析最近 20 行日志以排查问题..." "Analyzing recent logs for errors...")${NC}"
+        run_root journalctl -u "$SERVICE_NAME" -n 20 --no-pager
     fi
 }
 
